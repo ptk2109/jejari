@@ -21,6 +21,11 @@ struct JejariApp: App {
         }
         .windowResizability(.contentSize)
 
+        Window("배치 창 고르기", id: AppWindow.edit.rawValue) {
+            EditView().environmentObject(state)
+        }
+        .windowResizability(.contentSize)
+
         Window("배치 관리", id: AppWindow.manage.rawValue) {
             ManageView().environmentObject(state)
         }

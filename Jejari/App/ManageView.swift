@@ -27,6 +27,10 @@ struct ManageView: View {
             HStack {
                 Button("불러오기") { if let selection { state.restore(selection) } }
                     .disabled(selection == nil || state.busy)
+                Button("창 고르기…") { if let selection { state.startEdit(selection) } }
+                    .disabled(selection == nil)
+                Button("복제") { if let selection { self.selection = state.duplicate(selection) ?? selection } }
+                    .disabled(selection == nil)
                 Button("이름 바꾸기") { if let selection { startRename(selection) } }
                     .disabled(selection == nil)
                 Button("삭제", role: .destructive) { deleting = selection }
@@ -39,7 +43,7 @@ struct ManageView: View {
             }
         }
         .padding(16)
-        .frame(width: 480, height: 400)
+        .frame(width: 560, height: 400)
         .onAppear { state.reload() }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("새 이름", text: $newName)
@@ -63,6 +67,8 @@ struct ManageView: View {
     @ViewBuilder
     private func actions(for name: String) -> some View {
         Button("불러오기") { state.restore(name) }
+        Button("창 고르기…") { state.startEdit(name) }
+        Button("복제") { selection = state.duplicate(name) ?? name }
         Button("이름 바꾸기") { startRename(name) }
         Button("삭제", role: .destructive) { deleting = name }
     }
@@ -75,6 +81,7 @@ struct ManageView: View {
     private func detail(_ snapshot: Snapshot) -> String {
         let date = snapshot.createdAt.formatted(date: .abbreviated, time: .shortened)
         let spaces = snapshot.spaces.reduce(0) { $0 + $1.spaces.count }
-        return "\(date) · 창 \(snapshot.windows.count)개 · 모니터 \(snapshot.displays.count)대 · 가상화면 \(spaces)개"
+        let windows = snapshot.includedWindows.count == snapshot.windows.count ? "\(snapshot.windows.count)" : "\(snapshot.includedWindows.count)/\(snapshot.windows.count)"
+        return "\(date) · 창 \(windows)개 · 모니터 \(snapshot.displays.count)대 · 가상화면 \(spaces)개"
     }
 }

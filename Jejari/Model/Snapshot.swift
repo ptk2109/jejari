@@ -10,6 +10,14 @@ struct Snapshot: Codable, Identifiable {
     var spaces: [SavedDisplaySpaces]
     var apps: [SavedApp]
     var windows: [SavedWindow]
+
+    var includedWindows: [SavedWindow] { windows.filter(\.isIncluded) }
+
+    /// 창이 하나도 없는 실행 중인 앱의 인덱스
+    var windowlessAppIndexes: [Int] {
+        let withWindows = Set(windows.map(\.bundleId))
+        return apps.indices.filter { !withWindows.contains(apps[$0].bundleId) }
+    }
 }
 
 struct SavedDisplay: Codable, Hashable {
@@ -38,6 +46,13 @@ struct SavedApp: Codable {
     var bundleId: String
     var name: String
     var path: String
+    /// 사용자가 뺀 앱. nil이면 포함 (예전 파일과 호환)
+    var excluded: Bool? = nil
+
+    var isIncluded: Bool {
+        get { excluded != true }
+        set { excluded = newValue ? nil : true }
+    }
 }
 
 /// 창 하나와 매칭 단서 (기획서 4장 창 매칭 전략)
@@ -54,4 +69,11 @@ struct SavedWindow: Codable {
     var spaceUuid: String
     var minimized: Bool
     var fullScreen: Bool
+    /// 사용자가 뺀 창. 지우지 않고 표시만 해서 나중에 다시 포함할 수 있게 한다. nil이면 포함 (예전 파일과 호환)
+    var excluded: Bool? = nil
+
+    var isIncluded: Bool {
+        get { excluded != true }
+        set { excluded = newValue ? nil : true }
+    }
 }

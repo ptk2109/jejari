@@ -36,7 +36,7 @@ final class Restorer: @unchecked Sendable {
 
     func run() -> RestoreReport {
         displays = Dictionary(uniqueKeysWithValues: DisplayService.current().map { ($0.uuid, $0.frame) })
-        var windows = snapshot.windows
+        var windows = snapshot.includedWindows  // 사용자가 뺀 창은 건드리지 않는다
         let extraSpaces = substituteMissingDisplays(&windows)
 
         if !dryRun && SkyLight.hotKeysAvailable && !SpaceService.disabledDesktopHotKeys().isEmpty {

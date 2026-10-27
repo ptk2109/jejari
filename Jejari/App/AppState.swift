@@ -17,7 +17,7 @@ struct ActionResult: Codable {
 
 /// 앱이 여는 창
 enum AppWindow: String {
-    case save, manage, result, settings
+    case save, edit, manage, result, settings
 }
 
 /// 메뉴와 화면이 공유하는 상태. 창 수집과 복원은 시간이 걸리므로 백그라운드에서 돌리고 결과만 메인에서 반영한다
@@ -35,8 +35,8 @@ final class AppState: ObservableObject {
     /// 저장 확인 창에서 고르는 중인 스냅샷 (기획서 12.6)
     @Published var draft: Snapshot?
     @Published var draftName = ""
-    @Published var excludedWindows = Set<Int>()     // draft.windows 인덱스
-    @Published var excludedApps = Set<String>()     // 창 없이 실행 중인 앱 bundleId
+    /// 배치 관리에서 포함할 창을 다시 고르는 중인 스냅샷
+    @Published var editing: Snapshot?
 
     /// SwiftUI 창을 여는 동작. 메뉴바 아이콘이 나타날 때 받아 둔다
     var openWindowAction: OpenWindowAction?
@@ -128,36 +128,20 @@ final class AppState: ObservableObject {
                 self.status = ""
                 self.draft = snapshot
                 self.draftName = suggested
-                self.excludedWindows = []
-                self.excludedApps = []
             }
         }
     }
 
-    /// 창이 하나도 없는 실행 중인 앱
-    var draftWindowlessApps: [SavedApp] {
-        guard let draft else { return [] }
-        let withWindows = Set(draft.windows.map(\.bundleId))
-        return draft.apps.filter { !withWindows.contains($0.bundleId) }
-    }
-
-    /// 확인 창에서 고른 창과 앱만 남겨 저장한다
+    /// 확인 창에서 고른 결과를 저장한다. 뺀 창도 표시만 해서 남긴다
     func commitDraft() {
         guard var snapshot = draft else { return }
         let name = draftName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty, name != SnapshotStore.previousStateName else { return }
         snapshot.name = name
         snapshot.createdAt = Date()
-        snapshot.windows = snapshot.windows.indices.filter { !excludedWindows.contains($0) }.map { snapshot.windows[$0] }
-        // 앱은 남은 창이 있거나, 창 없이 실행 중이던 앱 중 빼지 않은 것만 (창을 모두 뺀 앱은 같이 빠진다)
-        let keptBundles = Set(snapshot.windows.map(\.bundleId))
-        let windowless = Set(draftWindowlessApps.map(\.bundleId))
-        snapshot.apps = snapshot.apps.filter {
-            keptBundles.contains($0.bundleId) || (windowless.contains($0.bundleId) && !excludedApps.contains($0.bundleId))
-        }
         do {
             try SnapshotStore.save(snapshot)
-            status = "\"\(name)\" 저장: 창 \(snapshot.windows.count)개, 앱 \(snapshot.apps.count)개"
+            status = "\"\(name)\" 저장: 창 \(snapshot.includedWindows.count)개"
         } catch {
             status = "저장 실패: \(error.localizedDescription)"
         }
@@ -199,6 +183,32 @@ final class AppState: ObservableObject {
         do { try SnapshotStore.rename(name, to: trimmed) } catch { return SnapshotStore.exists(trimmed) ? "같은 이름이 이미 있습니다" : error.localizedDescription }
         reload()
         return nil
+    }
+
+    /// 포함할 창 다시 고르기
+    func startEdit(_ name: String) {
+        guard let snapshot = try? SnapshotStore.load(name) else { return }
+        editing = snapshot
+        open(.edit)
+    }
+
+    func commitEdit() {
+        guard let snapshot = editing else { return }
+        try? SnapshotStore.save(snapshot)
+        editing = nil
+        reload()
+    }
+
+    /// "이름 복사본", 있으면 "이름 복사본 2", 3 … 으로 복제하고 새 이름을 돌려준다
+    func duplicate(_ name: String) -> String? {
+        guard var snapshot = try? SnapshotStore.load(name) else { return nil }
+        var copyName = "\(name) 복사본", number = 2
+        while SnapshotStore.exists(copyName) { copyName = "\(name) 복사본 \(number)"; number += 1 }
+        snapshot.name = copyName
+        snapshot.createdAt = Date()
+        guard (try? SnapshotStore.save(snapshot)) != nil else { return nil }
+        reload()
+        return copyName
     }
 
     func delete(_ name: String) {
