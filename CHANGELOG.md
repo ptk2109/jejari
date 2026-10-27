@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-28
+
+단축어나 스크립트로 제자리를 부르고 있었다면 업데이트 뒤 설정 → 일반에서 "외부 명령"을 허용해야 한다.
+
+### 보안
+
+- 외부 명령(`jejari://`)으로 저장·불러오기·되돌리기·정리하기를 하려면 설정 → 일반에서 "외부 명령"을 허용해야 한다 (기본: 허용 안 함). 웹페이지나 다른 앱이 몰래 배치를 바꾸거나 앱을 끄지 못하게
+- 허용해도 가상화면을 지우거나 앱을 끄는 외부 명령(`collapse`, `wipe`, 종료 요청 배치의 `restore`)은 매번 확인 창을 띄운다
+- Chrome 창을 다시 열 때 웹·파일·chrome:// 주소만 넘김 (다른 값이 Chrome 옵션으로 읽히지 않게)
+- Hardened Runtime을 켜고 디버거 연결 허용을 뺌. 손쉬운 사용 권한을 가진 제자리에 다른 프로그램이 코드를 끼워 넣지 못하게
+
+### 수정
+
+- Chrome 탭이 아주 많으면 저장이 끝나지 않을 수 있던 문제
+
 ## [0.3.0] - 2026-10-27
 
 ### 변경
@@ -55,7 +70,8 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ptk2109/jejari/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ptk2109/jejari/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ptk2109/jejari/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ptk2109/jejari/releases/tag/v0.1.0

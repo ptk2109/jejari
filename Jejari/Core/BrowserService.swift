@@ -22,16 +22,9 @@ enum BrowserService {
             return out
         end tell
         """
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", source]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        guard (try? process.run()) != nil else { return [] }
-        process.waitUntilExit()
+        guard let output = ExternalCommand.run("/usr/bin/osascript", ["-e", source]) else { return [] }
         var result: [(bounds: [Double], urls: [String])] = []
-        for line in (String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "").split(separator: "\n") {
+        for line in output.split(separator: "\n") {
             let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
             if fields.first == "W", fields.count >= 2 {
                 result.append((fields[1].split(separator: ",").compactMap { Double($0) }, []))
@@ -49,12 +42,11 @@ enum BrowserService {
         }?.urls
     }
 
-    /// 새 창 하나에 URL들을 탭으로 연다 (권한 불필요)
+    /// 새 창 하나에 URL들을 탭으로 연다 (권한 불필요).
+    /// 주소는 Chrome 실행 인자로 넘어가므로 웹·파일·chrome:// 주소만 넘긴다 ("--"로 시작하는 값이 Chrome 옵션으로 읽히지 않게)
     static func openChromeWindow(_ urls: [String]) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-na", "Google Chrome", "--args", "--new-window"] + urls
-        try? process.run()
-        process.waitUntilExit()
+        let safe = urls.filter { ["http", "https", "file", "chrome"].contains(URL(string: $0)?.scheme?.lowercased()) }
+        guard !safe.isEmpty else { return }
+        ExternalCommand.run("/usr/bin/open", ["-na", "Google Chrome", "--args", "--new-window"] + safe)
     }
 }

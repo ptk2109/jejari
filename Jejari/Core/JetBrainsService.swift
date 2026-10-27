@@ -24,10 +24,6 @@ enum JetBrainsService {
 
     /// 프로젝트를 연다. 한꺼번에 여러 개를 보내면 하나만 열린 적이 있어 호출하는 쪽에서 하나씩 연다 (0단계)
     static func open(project path: String, appPath: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-g", "-a", appPath, path]
-        try? process.run()
-        process.waitUntilExit()
+        ExternalCommand.openInBackground(app: appPath, [path])
     }
 }

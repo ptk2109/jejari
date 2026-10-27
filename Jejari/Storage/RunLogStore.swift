@@ -1,11 +1,13 @@
 import Foundation
 
-/// 불러오기 기록: 직전 상태, 결과와 진행 로그, 불러온 뒤 상태를 남겨 결과를 추적한다.
-/// 안정화되면 끈다 (UserDefaults "debugLogging" = false)
+/// 불러오기 기록: 직전 상태, 결과와 진행 로그, 불러온 뒤 상태를 남겨 결과를 추적한다. 설정 → 일반에서 끌 수 있다
 enum RunLogStore {
     static let keep = 20
 
-    static var isEnabled: Bool { UserDefaults.standard.object(forKey: "debugLogging") as? Bool ?? true }
+    static var isEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "debugLogging") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "debugLogging") }
+    }
 
     static var directory: URL { SnapshotStore.directory.deletingLastPathComponent().appendingPathComponent("logs", isDirectory: true) }
 
@@ -20,12 +22,9 @@ enum RunLogStore {
 
     /// logs/<시각>-<배치 이름>/ 에 before.json, report.json, after.json
     static func record(_ entry: Entry, before: Snapshot?, after: Snapshot?) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        let encoder = SnapshotStore.encoder
         let stamp = entry.startedAt.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false).timeSeparator(.omitted).dateSeparator(.dash))
-        let safe = entry.snapshot.replacingOccurrences(of: "/", with: "／")
-        let folder = directory.appendingPathComponent("\(stamp)-\(safe)", isDirectory: true)
+        let folder = directory.appendingPathComponent("\(stamp)-\(SnapshotStore.fileName(entry.snapshot))", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? encoder.encode(entry).write(to: folder.appendingPathComponent("report.json"))
         if let before { try? encoder.encode(before).write(to: folder.appendingPathComponent("before.json")) }

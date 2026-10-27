@@ -2,19 +2,6 @@ import AppKit
 import SwiftUI
 @preconcurrency import UserNotifications
 
-/// 외부 명령(jejari://)의 결과. Application Support/Jejari/last-result.json에 남긴다
-struct ActionResult: Codable {
-    var action: String
-    var name: String
-    var finishedAt: Date
-    var ok: Bool
-    var summary: String
-    var moved: [String] = []
-    var missing: [String] = []
-    var problems: [String] = []
-    var log: [String] = []
-}
-
 /// 앱이 여는 창
 enum AppWindow: String {
     case save, edit, manage, result, settings
@@ -93,108 +80,6 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: 외부 명령
-
-    /// jejari://save?name=…, restore?name=…[&mode=full|arrange], verify?name=…, undo, status, grant, open?window=… (개발 빌드: scramble)
-    /// 외부 명령은 확인 창이나 알림 없이 바로 실행하고 결과를 파일로 남긴다
-    func handle(_ url: URL) {
-        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        let name = query.first { $0.name == "name" }?.value ?? "기본"
-        let mode = query.first { $0.name == "mode" }?.value.flatMap(RestoreMode.init) ?? .full
-        switch url.host {
-        case "save": save(name, quiet: true)
-        case "restore": restore(name, mode: mode, quiet: true)
-        case "verify": restore(name, quiet: true, verifyOnly: true)
-        case "undo": restore(SnapshotStore.previousStateName, mode: .arrange, isUndo: true, quiet: true)
-        case "collapse": collapse(quiet: true)
-        case "wipe": wipe(quiet: true)
-        case "grant":
-            // 권한 요청 창을 띄워 손쉬운 사용 목록에 제자리를 올리고 설정 화면을 연다
-            if let item = SettingsCheck.items().first(where: { $0.id == "accessibility" }) { SettingsCheck.perform(item) }
-        case "open":
-            // jejari://open?window=save|manage|result|settings
-            let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "window" }?.value ?? ""
-            let ready = openWindowAction != nil
-            if let window = AppWindow(rawValue: id) { window == .save ? startSave() : open(window) }
-            writeResult(ActionResult(action: "open", name: id, finishedAt: Date(), ok: ready && AppWindow(rawValue: id) != nil,
-                                     summary: ready ? "\(id) 창 열기" : "창 여는 동작이 아직 준비되지 않음"))
-        case "status":
-            reload()
-            writeResult(ActionResult(action: "status", name: "", finishedAt: Date(), ok: AXIsProcessTrusted(),
-                                     summary: checks.map { "\($0.ok ? "✅" : "⚠️") \($0.title): \($0.detail)" }.joined(separator: "\n")))
-        #if DEBUG
-        case "debugdrag":
-            // jejari://debugdrag?app=<bundle id 일부>&to=<번호>: 그 앱의 첫 창을 끌어서 다른 Space로
-            let app = query.first { $0.name == "app" }?.value ?? ""
-            let to = Int(query.first { $0.name == "to" }?.value ?? "") ?? 1
-            Task.detached {
-                let log = DebugTools.drag(appQuery: app, to: to)
-                await MainActor.run { self.writeResult(ActionResult(action: "debugdrag", name: app, finishedAt: Date(), ok: true, summary: "끌기 시험", log: log)) }
-            }
-        case "debugwindows":
-            // 제자리 자신의 창 목록 (제목, 크기, 보이는지)
-            writeResult(ActionResult(action: "debugwindows", name: "", finishedAt: Date(), ok: true, summary: "",
-                                     log: NSApp.windows.map { "\($0.title.isEmpty ? "(제목 없음)" : $0.title) \(Int($0.frame.width))x\(Int($0.frame.height)) 보임=\($0.isVisible) \(type(of: $0))" }))
-        case "debugscan":
-            // jejari://debugscan?app=…: 그 앱의 모든 AX 창(원격 토큰)과 분류
-            let appQuery = (query.first { $0.name == "app" }?.value ?? "").lowercased()
-            Task.detached {
-                var log: [String] = []
-                for app in WindowService.regularApps() where (app.bundleIdentifier ?? "").lowercased().contains(appQuery) {
-                    let scan = WindowService.scan(pid: app.processIdentifier)
-                    log.append("\(app.localizedName ?? "?"): 창 \(scan.windows.map { "\($0.windowID) \"\($0.title)\" \(Int($0.frame.width))x\(Int($0.frame.height))\(scan.maybeBlockers.contains($0.windowID) ? " (보류)" : "")" }), 입력 대기 \(scan.blockers)")
-                    for id: UInt64 in 0..<WindowService.elementScanLimit {
-                        guard let el = AX.remoteElement(pid: app.processIdentifier, elementID: id),
-                              (AX.attribute(el, kAXRoleAttribute) as String?) == kAXWindowRole, let wid = AX.windowID(el) else { continue }
-                        let f = AX.frame(el)
-                        log.append("   요소 \(id): wid \(wid) \"\(AX.attribute(el, kAXTitleAttribute) as String? ?? "")\" \(AX.attribute(el, kAXSubroleAttribute) as String? ?? "?") \(Int(f.width))x\(Int(f.height)) Space \(SpaceService.location(of: wid).map { "#\($0.index)" } ?? "없음") 크기변경 \(AX.isSettable(el, kAXSizeAttribute)) 모달 \(AX.attribute(el, kAXModalAttribute) as Bool? ?? false)")
-                    }
-                }
-                await MainActor.run { self.writeResult(ActionResult(action: "debugscan", name: appQuery, finishedAt: Date(), ok: true, summary: "", log: log)) }
-            }
-        case "debugremove":
-            let index = Int(query.first { $0.name == "index" }?.value ?? "") ?? 0
-            let view = Int(query.first { $0.name == "view" }?.value ?? "")
-            Task.detached {
-                var log: [String] = []
-                if let main = DisplayService.current().first(where: \.isMain) {
-                    if let view { log.append("먼저 #\(view) 보기: \(SpaceService.switchTo(display: main.uuid, index: view))") }
-                    let n = SpaceService.removeSpaces(display: main.uuid, screen: main.frame, indexes: [index]) { log.append($0) }
-                    log.append("삭제 \(n)개, 지금 \(SpaceService.layout().first { $0.displayUuid == main.uuid }?.ids.count ?? -1)개")
-                }
-                await MainActor.run { self.writeResult(ActionResult(action: "debugremove", name: "", finishedAt: Date(), ok: true, summary: "", log: log)) }
-            }
-        case "debugvd":
-            let app = query.first { $0.name == "app" }?.value ?? ""
-            let to = Int(query.first { $0.name == "to" }?.value ?? "") ?? 1
-            Task.detached {
-                let log = DebugTools.virtualBounce(appQuery: app, to: to)
-                await MainActor.run { self.writeResult(ActionResult(action: "debugvd", name: app, finishedAt: Date(), ok: true, summary: "가상 모니터 시험", log: log)) }
-            }
-        case "scramble":
-            guard AXIsProcessTrusted(), !busy else { return }
-            busy = true
-            Task.detached {
-                let log = DebugTools.scramble()
-                await MainActor.run {
-                    self.busy = false
-                    self.writeResult(ActionResult(action: "scramble", name: "", finishedAt: Date(), ok: true, summary: "\(log.count)개 흐트러뜨림", log: log))
-                }
-            }
-        #endif
-        default:
-            writeResult(ActionResult(action: url.host ?? "?", name: name, finishedAt: Date(), ok: false, summary: "모르는 명령"))
-        }
-    }
-
-    private func writeResult(_ result: ActionResult) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        try? FileManager.default.createDirectory(at: Self.resultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? encoder.encode(result).write(to: Self.resultURL, options: .atomic)
-    }
-
     // MARK: 저장
 
     /// 창을 모은 뒤 저장 확인 창을 연다 (기획서 12.6: 수집된 창을 체크박스로 보여 주고 고르게 한다)
@@ -270,7 +155,7 @@ final class AppState: ObservableObject {
     }
 
     /// 외부 명령용: 확인 창 없이 바로 저장. 같은 이름이 있으면 저장 창처럼 설정과 뺀 앱·창을 이어받는다
-    private func save(_ name: String, quiet: Bool) {
+    func save(_ name: String, quiet: Bool) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         busy = true
         status = "창을 모으는 중…"
@@ -354,7 +239,8 @@ final class AppState: ObservableObject {
     // MARK: 불러오기
 
     /// 불러오기 직전 상태를 자동 저장하고 복원한다 (기획서 12.5). 되돌리기와 검증은 직전 상태를 저장하지 않는다
-    func restore(_ name: String, mode: RestoreMode = .full, isUndo: Bool = false, quiet: Bool = false, verifyOnly: Bool = false) {
+    /// ask: 종료 요청 배치면 끌 앱 목록을 보여 주고 확인한다 (외부 명령은 배포판에서만)
+    func restore(_ name: String, mode: RestoreMode = .full, isUndo: Bool = false, quiet: Bool = false, ask: Bool = true, verifyOnly: Bool = false) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         let snapshot: Snapshot
         do { snapshot = try SnapshotStore.load(name) } catch {
@@ -362,8 +248,8 @@ final class AppState: ObservableObject {
             if quiet { writeResult(ActionResult(action: verifyOnly ? "verify" : "restore", name: name, finishedAt: Date(), ok: false, summary: status)) }
             return
         }
-        // 종료 요청 배치는 불러오기 전에 목록을 보여 주고 확인한다 (외부 명령은 확인 없이)
-        if mode == .full && !verifyOnly && !quiet && snapshot.otherAppsPolicy == .quit {
+        // 종료 요청 배치는 불러오기 전에 목록을 보여 주고 확인한다
+        if mode == .full && !verifyOnly && !isUndo && ask && snapshot.otherAppsPolicy == .quit {
             let targets = OtherAppsService.quitTargets(for: snapshot).compactMap(\.localizedName)
             if !targets.isEmpty {
                 let alert = NSAlert()
@@ -379,7 +265,7 @@ final class AppState: ObservableObject {
                     var keep = snapshot
                     keep.otherAppsPolicy = .keep
                     return restoreLoaded(keep, name: name, mode: mode, isUndo: isUndo, quiet: quiet, verifyOnly: verifyOnly)
-                default: return
+                default: return cancelled("restore", name: name, quiet: quiet)
                 }
             }
         }
@@ -430,27 +316,27 @@ final class AppState: ObservableObject {
     // MARK: 🧰 정리하기
 
     /// 🧲 한 화면으로 모으기: 모니터마다 1번만 남기고 가상화면을 지운다. 되돌리기로 되돌릴 수 있다
-    func collapse(quiet: Bool = false) {
+    func collapse(quiet: Bool = false, ask: Bool = true) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         let count = CleanupService.removableSpaceCount()
-        if !quiet {
-            guard count > 0 else { return info("지울 가상화면이 없어요", "이미 모니터마다 화면이 하나뿐이에요.") }
+        if count == 0 && !quiet { return info("지울 가상화면이 없어요", "이미 모니터마다 화면이 하나뿐이에요.") }
+        if ask && count > 0 {
             guard confirm("가상화면 \(count)개를 지우고 모든 창을 1번 화면으로 모아요",
                           "앱은 끄지 않아요. 메뉴의 ↩️ 되돌리기로 원래 가상화면과 창 위치로 돌아갈 수 있어요.",
-                          ok: "모으기") else { return }
+                          ok: "모으기") else { return cancelled("collapse", name: "", quiet: quiet) }
         }
         runCleanup(title: "🧲 한 화면으로 모으기", quitApps: [], quiet: quiet)
     }
 
     /// 🧹 깨끗하게 비우기: 가상화면을 모두 지우고 앱에 종료를 요청한다 (제자리, Finder, 항상 건드리지 않을 앱은 빼고)
-    func wipe(quiet: Bool = false) {
+    func wipe(quiet: Bool = false, ask: Bool = true) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         let targets = CleanupService.quitTargets()
-        if !quiet {
+        if ask {
             let names = targets.compactMap(\.localizedName)
             guard confirm("가상화면 \(CleanupService.removableSpaceCount())개를 지우고 앱 \(names.count)개에 종료를 요청해요",
                           names.joined(separator: ", ") + "\n\n저장 안 한 문서가 있으면 각 앱이 저장할지 물어요. Finder와 '항상 건드리지 않을 앱'은 끄지 않아요.\n↩️ 되돌리기는 가상화면과 창 위치만 되돌리고, 끈 앱을 다시 켜지는 않아요.",
-                          ok: "비우기") else { return }
+                          ok: "비우기") else { return cancelled("wipe", name: "", quiet: quiet) }
         }
         runCleanup(title: "🧹 깨끗하게 비우기", quitApps: targets, quiet: quiet)
     }
@@ -482,6 +368,11 @@ final class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    /// 확인 창에서 취소함. 외부 명령이면 기다리는 쪽을 위해 결과를 남긴다
+    private func cancelled(_ action: String, name: String, quiet: Bool) {
+        if quiet { writeResult(ActionResult(action: action, name: name, finishedAt: Date(), ok: false, summary: "확인 창에서 취소함")) }
     }
 
     private func confirm(_ title: String, _ message: String, ok: String) -> Bool {

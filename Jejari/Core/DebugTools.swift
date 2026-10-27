@@ -114,4 +114,73 @@ enum DebugTools {
         return log
     }
 }
+
+/// 개발 빌드 전용 URL 명령 (jejari://debug…, scramble). 처리했으면 true
+extension AppState {
+    func handleDebug(_ command: String, _ query: [URLQueryItem]) -> Bool {
+        switch command {
+        case "debugdrag":
+            // jejari://debugdrag?app=<bundle id 일부>&to=<번호>: 그 앱의 첫 창을 끌어서 다른 Space로
+            let app = query.first { $0.name == "app" }?.value ?? ""
+            let to = Int(query.first { $0.name == "to" }?.value ?? "") ?? 1
+            Task.detached {
+                let log = DebugTools.drag(appQuery: app, to: to)
+                await MainActor.run { self.writeResult(ActionResult(action: "debugdrag", name: app, finishedAt: Date(), ok: true, summary: "끌기 시험", log: log)) }
+            }
+        case "debugwindows":
+            // 제자리 자신의 창 목록 (제목, 크기, 보이는지)
+            writeResult(ActionResult(action: "debugwindows", name: "", finishedAt: Date(), ok: true, summary: "",
+                                     log: NSApp.windows.map { "\($0.title.isEmpty ? "(제목 없음)" : $0.title) \(Int($0.frame.width))x\(Int($0.frame.height)) 보임=\($0.isVisible) \(type(of: $0))" }))
+        case "debugscan":
+            // jejari://debugscan?app=…: 그 앱의 모든 AX 창(원격 토큰)과 분류
+            let appQuery = (query.first { $0.name == "app" }?.value ?? "").lowercased()
+            Task.detached {
+                var log: [String] = []
+                for app in WindowService.regularApps() where (app.bundleIdentifier ?? "").lowercased().contains(appQuery) {
+                    let scan = WindowService.scan(pid: app.processIdentifier)
+                    log.append("\(app.localizedName ?? "?"): 창 \(scan.windows.map { "\($0.windowID) \"\($0.title)\" \(Int($0.frame.width))x\(Int($0.frame.height))\(scan.maybeBlockers.contains($0.windowID) ? " (보류)" : "")" }), 입력 대기 \(scan.blockers)")
+                    for id: UInt64 in 0..<WindowService.elementScanLimit {
+                        guard let el = AX.remoteElement(pid: app.processIdentifier, elementID: id),
+                              (AX.attribute(el, kAXRoleAttribute) as String?) == kAXWindowRole, let wid = AX.windowID(el) else { continue }
+                        let f = AX.frame(el)
+                        log.append("   요소 \(id): wid \(wid) \"\(AX.attribute(el, kAXTitleAttribute) as String? ?? "")\" \(AX.attribute(el, kAXSubroleAttribute) as String? ?? "?") \(Int(f.width))x\(Int(f.height)) Space \(SpaceService.location(of: wid).map { "#\($0.index)" } ?? "없음") 크기변경 \(AX.isSettable(el, kAXSizeAttribute)) 모달 \(AX.attribute(el, kAXModalAttribute) as Bool? ?? false)")
+                    }
+                }
+                await MainActor.run { self.writeResult(ActionResult(action: "debugscan", name: appQuery, finishedAt: Date(), ok: true, summary: "", log: log)) }
+            }
+        case "debugremove":
+            let index = Int(query.first { $0.name == "index" }?.value ?? "") ?? 0
+            let view = Int(query.first { $0.name == "view" }?.value ?? "")
+            Task.detached {
+                var log: [String] = []
+                if let main = DisplayService.current().first(where: \.isMain) {
+                    if let view { log.append("먼저 #\(view) 보기: \(SpaceService.switchTo(display: main.uuid, index: view))") }
+                    let n = SpaceService.removeSpaces(display: main.uuid, screen: main.frame, indexes: [index]) { log.append($0) }
+                    log.append("삭제 \(n)개, 지금 \(SpaceService.layout().first { $0.displayUuid == main.uuid }?.ids.count ?? -1)개")
+                }
+                await MainActor.run { self.writeResult(ActionResult(action: "debugremove", name: "", finishedAt: Date(), ok: true, summary: "", log: log)) }
+            }
+        case "debugvd":
+            let app = query.first { $0.name == "app" }?.value ?? ""
+            let to = Int(query.first { $0.name == "to" }?.value ?? "") ?? 1
+            Task.detached {
+                let log = DebugTools.virtualBounce(appQuery: app, to: to)
+                await MainActor.run { self.writeResult(ActionResult(action: "debugvd", name: app, finishedAt: Date(), ok: true, summary: "가상 모니터 시험", log: log)) }
+            }
+        case "scramble":
+            guard AXIsProcessTrusted(), !busy else { return true }
+            busy = true
+            Task.detached {
+                let log = DebugTools.scramble()
+                await MainActor.run {
+                    self.busy = false
+                    self.writeResult(ActionResult(action: "scramble", name: "", finishedAt: Date(), ok: true, summary: "\(log.count)개 흐트러뜨림", log: log))
+                }
+            }
+        default:
+            return false
+        }
+        return true
+    }
+}
 #endif

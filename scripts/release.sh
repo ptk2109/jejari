@@ -34,8 +34,9 @@ xcodegen generate -q
 xcodebuild -project Jejari.xcodeproj -scheme Jejari -configuration Release -derivedDataPath build \
     -allowProvisioningUpdates build -quiet
 APP=build/Build/Products/Release/Jejari.app
-# 빌드하면 macOS가 이 앱을 jejari:// 처리 앱으로 등록한다. 그대로 두면 개발 중 보낸 URL 명령이 이 앱을 하나 더 띄우므로 등록을 지운다
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$APP"
+# 빌드하면 macOS가 이 앱을 jejari:// 처리 앱으로 등록한다. 그대로 두면 개발 중 보낸 URL 명령이 이 앱을 하나 더 띄우므로
+# 끝날 때(실패해도) 등록을 지운다. 서명 확인·압축 중에 다시 등록되므로 빌드 직후가 아니라 맨 끝에 한다
+trap '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$APP" 2>/dev/null || true' EXIT
 PLIST="$APP/Contents/Info.plist"
 BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST")
 FEED=$(/usr/libexec/PlistBuddy -c "Print SUFeedURL" "$PLIST")

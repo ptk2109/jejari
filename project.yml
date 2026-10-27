@@ -29,8 +29,8 @@ targets:
       path: Jejari/Info.plist
       properties:
         CFBundleDisplayName: 제자리
-        CFBundleShortVersionString: "0.3.0"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "0.4.0"
+        CFBundleVersion: "4"
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.utilities
         NSAppleEventsUsageDescription: 저장할 때 브라우저 창의 탭 주소를 읽어 불러올 때 다시 엽니다.
@@ -51,7 +51,13 @@ targets:
         CODE_SIGN_STYLE: Automatic
         # 다른 앱의 창을 제어하고 비공개 API를 쓰므로 샌드박스를 쓰지 않는다 (기획서 7장)
         ENABLE_APP_SANDBOX: NO
-        ENABLE_HARDENED_RUNTIME: NO
+        # 손쉬운 사용 권한을 가진 앱이라 다른 프로그램이 코드를 끼워 넣지 못하게 한다 (DYLD_INSERT_LIBRARIES 등)
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Jejari/Jejari.entitlements
         # 비공개 CGVirtualDisplay 선언 (Core/CGVirtualDisplay.h)
         SWIFT_OBJC_BRIDGING_HEADER: Jejari/Core/CGVirtualDisplay.h
         GENERATE_INFOPLIST_FILE: NO
+      configs:
+        # 배포판에는 디버거 연결 허용(get-task-allow)을 넣지 않는다. 개발 인증서로 서명하면 Xcode가 자동으로 넣는다
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
