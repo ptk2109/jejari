@@ -17,6 +17,9 @@ struct LiveWindow {
 struct AppScan {
     var windows: [LiveWindow] = []
     var blockers: [String] = []      // 사용자 입력을 기다리는 창 (기획서 12.2 #20)
+    /// 크기를 바꿀 수 없는 작은 표준 창. 보통 창(메신저 친구 목록 등)일 수도, 입력 대기(SVN 인증 등)일 수도 있어
+    /// windows에 넣어 두고, 저장된 창과 짝이 안 지어진 것만 입력 대기로 본다
+    var maybeBlockers: Set<CGWindowID> = []
     var responding = true            // AX 요청에 제한 시간 안에 응답했는지
 }
 
@@ -50,11 +53,13 @@ enum WindowService {
             let title: String = AX.attribute(element, kAXTitleAttribute) ?? ""
             let isDialog = subrole == kAXDialogSubrole || subrole == kAXSystemDialogSubrole
             let small = frame.width < 600 && frame.height < 600
-            // 입력 대기 창: 모달 / 작은 대화상자 / 크기를 바꿀 수 없는 작은 표준 창 (예: SVN "인증 필요" 218x218)
-            if (AX.attribute(element, kAXModalAttribute) as Bool?) == true || (isDialog && small)
-                || (subrole == kAXStandardWindowSubrole && small && !AX.isSettable(element, kAXSizeAttribute)) {
+            // 입력 대기 창: 모달 / 작은 대화상자. 크기를 바꿀 수 없는 작은 표준 창은 보류 (maybeBlockers)
+            if (AX.attribute(element, kAXModalAttribute) as Bool?) == true || (isDialog && small) {
                 result.blockers.append("\(title) (\(Int(frame.width))x\(Int(frame.height)))")
                 continue
+            }
+            if subrole == kAXStandardWindowSubrole && small && !AX.isSettable(element, kAXSizeAttribute) {
+                result.maybeBlockers.insert(windowID)
             }
             // 모달 창이 떠 있으면 큰 메인 창이 AXDialog로 보이기도 한다 (JetBrains)
             guard subrole == kAXStandardWindowSubrole || isDialog else { continue }

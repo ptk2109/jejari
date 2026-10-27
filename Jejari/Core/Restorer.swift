@@ -281,10 +281,12 @@ final class Restorer: @unchecked Sendable {
                 let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
                 guard !apps.isEmpty else { still += indexes; continue }
                 var live: [LiveWindow] = [], blockers: [String] = [], responding = true
+                var maybeBlockers = Set<CGWindowID>()
                 for app in apps {
                     let scan = WindowService.scan(pid: app.processIdentifier)
                     live += scan.windows
                     blockers += scan.blockers
+                    maybeBlockers.formUnion(scan.maybeBlockers)
                     responding = responding && scan.responding
                 }
                 if responding { unresponsive.remove(bundleId) } else { unresponsive.insert(bundleId) }
@@ -307,6 +309,14 @@ final class Restorer: @unchecked Sendable {
                 }
                 let matched = Set(pairs.map(\.savedIndex))
                 let left = indexes.filter { !matched.contains($0) }
+                // 크기 고정 작은 창이 저장된 창과 짝이 안 지어졌고 아직 못 찾은 창이 있으면 입력 대기로 본다 (SVN 인증 등)
+                let pairedIDs = Set(pairs.map(\.live.windowID))
+                let strayBlockers = live.filter { maybeBlockers.contains($0.windowID) && !pairedIDs.contains($0.windowID) }
+                if !left.isEmpty && !strayBlockers.isEmpty {
+                    blockers += strayBlockers.map { "\($0.title) (\(Int($0.frame.width))x\(Int($0.frame.height)))" }
+                    if blocked[bundleId] == nil { progress("\(windows[indexes[0]].appName): 입력 대기 → 뒤로 미룸") }
+                    blocked[bundleId] = blockers
+                }
 
                 // 앱이 자리 잡았는데(창 수 15초 그대로, 띄운 지 20초 이상) 입력 대기도 아니고 할 수 있는 요청도 다 했으면 그 앱은 그만 기다린다
                 let settled = Date().timeIntervalSince(countSince[bundleId]!.since) > 15

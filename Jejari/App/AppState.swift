@@ -121,6 +121,23 @@ final class AppState: ObservableObject {
                 let log = DebugTools.drag(appQuery: app, to: to)
                 await MainActor.run { self.writeResult(ActionResult(action: "debugdrag", name: app, finishedAt: Date(), ok: true, summary: "끌기 시험", log: log)) }
             }
+        case "debugscan":
+            // jejari://debugscan?app=…: 그 앱의 모든 AX 창(원격 토큰)과 분류
+            let appQuery = (query.first { $0.name == "app" }?.value ?? "").lowercased()
+            Task.detached {
+                var log: [String] = []
+                for app in WindowService.regularApps() where (app.bundleIdentifier ?? "").lowercased().contains(appQuery) {
+                    let scan = WindowService.scan(pid: app.processIdentifier)
+                    log.append("\(app.localizedName ?? "?"): 창 \(scan.windows.map { "\($0.windowID) \"\($0.title)\" \(Int($0.frame.width))x\(Int($0.frame.height))\(scan.maybeBlockers.contains($0.windowID) ? " (보류)" : "")" }), 입력 대기 \(scan.blockers)")
+                    for id: UInt64 in 0..<WindowService.elementScanLimit {
+                        guard let el = AX.remoteElement(pid: app.processIdentifier, elementID: id),
+                              (AX.attribute(el, kAXRoleAttribute) as String?) == kAXWindowRole, let wid = AX.windowID(el) else { continue }
+                        let f = AX.frame(el)
+                        log.append("   요소 \(id): wid \(wid) \"\(AX.attribute(el, kAXTitleAttribute) as String? ?? "")\" \(AX.attribute(el, kAXSubroleAttribute) as String? ?? "?") \(Int(f.width))x\(Int(f.height)) Space \(SpaceService.location(of: wid).map { "#\($0.index)" } ?? "없음") 크기변경 \(AX.isSettable(el, kAXSizeAttribute)) 모달 \(AX.attribute(el, kAXModalAttribute) as Bool? ?? false)")
+                    }
+                }
+                await MainActor.run { self.writeResult(ActionResult(action: "debugscan", name: appQuery, finishedAt: Date(), ok: true, summary: "", log: log)) }
+            }
         case "debugremove":
             let index = Int(query.first { $0.name == "index" }?.value ?? "") ?? 0
             let view = Int(query.first { $0.name == "view" }?.value ?? "")
