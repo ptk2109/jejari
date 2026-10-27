@@ -1,11 +1,19 @@
 # 프로젝트 manifest (스키마 초안, 확정 전)
 name: jejari
 type: app
+stage: building
+version: 0.2.0
 stack: [swift, swiftui, appkit]
 platform: macos-15+
 repo: https://github.com/ptk2109/jejari
 commands:
   generate: "xcodegen generate"    # project.yml → Jejari.xcodeproj (생성물, 커밋 안 함)
-  build: "xcodebuild -project Jejari.xcodeproj -scheme Jejari -configuration Debug -derivedDataPath build build"
+  build: "xcodebuild -project Jejari.xcodeproj -scheme Jejari -configuration Debug -derivedDataPath build -allowProvisioningUpdates build"
   run: "open build/Build/Products/Debug/Jejari.app"
-  test: ""
+  build_release: "xcodebuild -project Jejari.xcodeproj -scheme Jejari -configuration Release -derivedDataPath build -allowProvisioningUpdates build"
+  release: "scripts/release.sh"   # 태그 커밋에서 배포판 빌드 + GitHub Release. --dry-run 가능
+  test: ""   # 자동 테스트 없음. 시험 방법은 docs/개발.md
+docs:
+  changelog: CHANGELOG.md
+  structure: docs/구조.md
+  development: docs/개발.md   # 버전·변경 기록·버전 내기 절차의 본체

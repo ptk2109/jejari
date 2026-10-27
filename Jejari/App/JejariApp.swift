@@ -68,6 +68,7 @@ private struct MenuBarIcon: View {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
+        _ = UpdateService.shared  // 자동 업데이트 확인 시작
         // 로그인 직후면 고른 배치를 자동으로 불러온다 (앱들이 뜰 시간을 기다린 뒤)
         let name = StartupService.autoLoadName
         if !name.isEmpty && StartupService.launchedRightAfterLogin {

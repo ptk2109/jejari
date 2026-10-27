@@ -8,6 +8,11 @@ options:
 configFiles:
   Debug: Configs/Signing.xcconfig
   Release: Configs/Signing.xcconfig
+packages:
+  # 자동 업데이트
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.10.1"
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -18,12 +23,14 @@ targets:
     platform: macOS
     sources:
       - Jejari
+    dependencies:
+      - package: Sparkle
     info:
       path: Jejari/Info.plist
       properties:
         CFBundleDisplayName: 제자리
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "0.2.0"
+        CFBundleVersion: "2"
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.utilities
         NSAppleEventsUsageDescription: 저장할 때 브라우저 창의 탭 주소를 읽어 불러올 때 다시 엽니다.
@@ -31,6 +38,12 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.nam24.jejari
             CFBundleURLSchemes: [jejari]
+        # 자동 업데이트 (Sparkle): 최신 GitHub Release의 appcast.xml을 하루에 한 번 확인한다.
+        # 업데이트 파일은 SUPublicEDKey의 짝인 비밀 키로 서명한다 (docs/개발.md 버전 내기)
+        SUFeedURL: https://github.com/ptk2109/jejari/releases/latest/download/appcast.xml
+        SUPublicEDKey: zbmiG+KD5xsLb9/PuAxuAb1UejPPkQgMU20bjRWb+gc=
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nam24.jejari

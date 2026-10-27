@@ -27,6 +27,7 @@ private struct GeneralSettings: View {
     @State private var autoLoadName = StartupService.autoLoadName
     @State private var autoLoadDelay = StartupService.autoLoadDelay
     @State private var logging = RunLogStore.isEnabled
+    @ObservedObject private var updates = UpdateService.shared
 
     var body: some View {
         ScrollView {
@@ -76,6 +77,15 @@ private struct GeneralSettings: View {
                     try? FileManager.default.createDirectory(at: RunLogStore.directory, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(RunLogStore.directory)
                 }
+
+                OptionGroup(title: "새 버전이 나오면?", selection: Binding(get: { updates.mode }, set: { updates.mode = $0 }),
+                            disabled: !UpdateService.isAvailable, notes: updateNotes, options: [
+                    (.notify, "알려 주기 (추천)", "하루에 한 번 새 버전이 있는지 확인하고, 있으면 무엇이 바뀌었는지 보여 줘요. [설치]를 누르면 받아서 다시 켜요.\n예) 아침에 \"제자리 0.3.0이 나왔어요\" 창이 뜨면 바뀐 내용을 읽고 설치."),
+                    (.install, "알아서 설치", "새 버전을 조용히 받아 두었다가 제자리를 끌 때(맥을 끌 때 포함) 바꿔 둬요. 묻지 않아요."),
+                    (.off, "확인하지 않음", "메뉴의 '업데이트 확인…'을 누를 때만 확인해요."),
+                ])
+                Button("지금 확인") { UpdateService.shared.checkNow() }
+                    .disabled(!updates.canCheck)
             }
             .padding(20)
         }
@@ -83,6 +93,15 @@ private struct GeneralSettings: View {
             launchAtLogin = StartupService.launchAtLogin
             autoLoadName = StartupService.autoLoadName
         }
+    }
+
+    private var updateNotes: [String] {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        var notes = ["지금 버전: \(version)"]
+        if !UpdateService.isAvailable {
+            notes.append("⚠️ 개발 빌드는 업데이트를 확인하지 않아요.")
+        }
+        return notes
     }
 
     private var loginNotes: [String] {

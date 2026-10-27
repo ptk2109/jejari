@@ -9,3 +9,5 @@ xcuserdata/
 Configs/Signing.local.xcconfig
 # project.yml에서 생성
 Jejari/Info.plist
+# 배포판 (scripts/release.sh)
+dist/
