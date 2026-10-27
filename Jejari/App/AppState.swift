@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 
 /// 외부 명령(jejari://)의 결과. Application Support/Jejari/last-result.json에 남긴다
 struct ActionResult: Codable {
@@ -14,17 +15,33 @@ struct ActionResult: Codable {
     var log: [String] = []
 }
 
+/// 앱이 여는 창
+enum AppWindow: String {
+    case save, manage, result, settings
+}
+
 /// 메뉴와 화면이 공유하는 상태. 창 수집과 복원은 시간이 걸리므로 백그라운드에서 돌리고 결과만 메인에서 반영한다
 @MainActor
 final class AppState: ObservableObject {
     static let shared = AppState()
 
-    @Published var snapshotNames: [String] = []
+    @Published var snapshots: [Snapshot] = []
     @Published var busy = false
     @Published var status = ""
     @Published var lastReport: RestoreReport?
+    @Published var lastReportName = ""
     @Published var checks: [CheckItem] = []
 
+    /// 저장 확인 창에서 고르는 중인 스냅샷 (기획서 12.6)
+    @Published var draft: Snapshot?
+    @Published var draftName = ""
+    @Published var excludedWindows = Set<Int>()     // draft.windows 인덱스
+    @Published var excludedApps = Set<String>()     // 창 없이 실행 중인 앱 bundleId
+
+    /// SwiftUI 창을 여는 동작. 메뉴바 아이콘이 나타날 때 받아 둔다
+    var openWindowAction: OpenWindowAction?
+
+    var snapshotNames: [String] { snapshots.map(\.name) }
     var canUndo: Bool { SnapshotStore.exists(SnapshotStore.previousStateName) }
     var needsAttention: Bool { checks.contains { !$0.ok && $0.required } }
 
@@ -35,14 +52,19 @@ final class AppState: ObservableObject {
     }
 
     func reload() {
-        snapshotNames = SnapshotStore.names()
+        snapshots = SnapshotStore.all()
         checks = SettingsCheck.items()
+    }
+
+    func open(_ window: AppWindow) {
+        openWindowAction?(id: window.rawValue)
+        NSApp.activate()
     }
 
     // MARK: 외부 명령
 
-    /// jejari://save?name=…, restore?name=…, verify?name=…, undo, status, grant (개발 빌드: scramble)
-    /// 외부 명령은 알림 창을 띄우지 않고 결과를 파일로 남긴다
+    /// jejari://save?name=…, restore?name=…, verify?name=…, undo, status, grant, open?window=… (개발 빌드: scramble)
+    /// 외부 명령은 확인 창이나 알림 없이 바로 실행하고 결과를 파일로 남긴다
     func handle(_ url: URL) {
         let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "name" }?.value ?? "기본"
         switch url.host {
@@ -53,6 +75,13 @@ final class AppState: ObservableObject {
         case "grant":
             // 권한 요청 창을 띄워 손쉬운 사용 목록에 제자리를 올리고 설정 화면을 연다
             if let item = SettingsCheck.items().first(where: { $0.id == "accessibility" }) { SettingsCheck.perform(item) }
+        case "open":
+            // jejari://open?window=save|manage|result|settings
+            let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "window" }?.value ?? ""
+            let ready = openWindowAction != nil
+            if let window = AppWindow(rawValue: id) { window == .save ? startSave() : open(window) }
+            writeResult(ActionResult(action: "open", name: id, finishedAt: Date(), ok: ready && AppWindow(rawValue: id) != nil,
+                                     summary: ready ? "\(id) 창 열기" : "창 여는 동작이 아직 준비되지 않음"))
         case "status":
             reload()
             writeResult(ActionResult(action: "status", name: "", finishedAt: Date(), ok: AXIsProcessTrusted(),
@@ -84,24 +113,61 @@ final class AppState: ObservableObject {
 
     // MARK: 저장
 
-    func promptSave() {
-        guard ensureAccessibility(quiet: false) else { return }
-        let alert = NSAlert()
-        alert.messageText = "현재 배치 저장"
-        alert.informativeText = "스냅샷 이름을 입력하세요. 같은 이름이 있으면 덮어씁니다."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.stringValue = snapshotNames.first ?? "기본"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "저장")
-        alert.addButton(withTitle: "취소")
-        alert.window.initialFirstResponder = field
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, name != SnapshotStore.previousStateName else { return }
-        save(name, quiet: false)
+    /// 창을 모은 뒤 저장 확인 창을 연다 (기획서 12.6: 수집된 창을 체크박스로 보여 주고 고르게 한다)
+    func startSave() {
+        guard ensureAccessibility(quiet: false), !busy else { return }
+        busy = true
+        status = "창을 모으는 중…"
+        draft = nil
+        open(.save)
+        let suggested = snapshots.first?.name ?? "기본"
+        Task.detached {
+            let snapshot = WindowService.capture(name: suggested)
+            await MainActor.run {
+                self.busy = false
+                self.status = ""
+                self.draft = snapshot
+                self.draftName = suggested
+                self.excludedWindows = []
+                self.excludedApps = []
+            }
+        }
     }
 
+    /// 창이 하나도 없는 실행 중인 앱
+    var draftWindowlessApps: [SavedApp] {
+        guard let draft else { return [] }
+        let withWindows = Set(draft.windows.map(\.bundleId))
+        return draft.apps.filter { !withWindows.contains($0.bundleId) }
+    }
+
+    /// 확인 창에서 고른 창과 앱만 남겨 저장한다
+    func commitDraft() {
+        guard var snapshot = draft else { return }
+        let name = draftName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name != SnapshotStore.previousStateName else { return }
+        snapshot.name = name
+        snapshot.createdAt = Date()
+        snapshot.windows = snapshot.windows.indices.filter { !excludedWindows.contains($0) }.map { snapshot.windows[$0] }
+        // 앱은 남은 창이 있거나, 창 없이 실행 중이던 앱 중 빼지 않은 것만 (창을 모두 뺀 앱은 같이 빠진다)
+        let keptBundles = Set(snapshot.windows.map(\.bundleId))
+        let windowless = Set(draftWindowlessApps.map(\.bundleId))
+        snapshot.apps = snapshot.apps.filter {
+            keptBundles.contains($0.bundleId) || (windowless.contains($0.bundleId) && !excludedApps.contains($0.bundleId))
+        }
+        do {
+            try SnapshotStore.save(snapshot)
+            status = "\"\(name)\" 저장: 창 \(snapshot.windows.count)개, 앱 \(snapshot.apps.count)개"
+        } catch {
+            status = "저장 실패: \(error.localizedDescription)"
+        }
+        draft = nil
+        reload()
+    }
+
+    func cancelDraft() { draft = nil }
+
+    /// 외부 명령용: 확인 창 없이 바로 저장
     private func save(_ name: String, quiet: Bool) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         busy = true
@@ -122,6 +188,22 @@ final class AppState: ObservableObject {
                                               log: snapshot.windows.map { "\($0.appName) \"\($0.title.prefix(40))\" \($0.displayUuid.prefix(8)) #\($0.spaceIndex)" }))
             }
         }
+    }
+
+    // MARK: 관리
+
+    func rename(_ name: String, to newName: String) -> String? {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed != name else { return nil }
+        guard trimmed != SnapshotStore.previousStateName else { return "이 이름은 쓸 수 없습니다" }
+        do { try SnapshotStore.rename(name, to: trimmed) } catch { return SnapshotStore.exists(trimmed) ? "같은 이름이 이미 있습니다" : error.localizedDescription }
+        reload()
+        return nil
+    }
+
+    func delete(_ name: String) {
+        try? SnapshotStore.delete(name)
+        reload()
     }
 
     // MARK: 불러오기
@@ -147,14 +229,17 @@ final class AppState: ObservableObject {
             await MainActor.run {
                 self.busy = false
                 self.status = verifyOnly ? "검증: 제자리 \(report.alreadyInPlace)개, 다름 \(report.moved.count)개, 없음 \(report.missing.count)개" : report.summary
-                if !verifyOnly { self.lastReport = report }
+                if !verifyOnly {
+                    self.lastReport = report
+                    self.lastReportName = isUndo ? "되돌리기" : name
+                }
                 self.reload()
                 if quiet {
                     self.writeResult(ActionResult(action: verifyOnly ? "verify" : (isUndo ? "undo" : "restore"), name: name, finishedAt: Date(),
                                                   ok: report.problems.isEmpty && report.missing.isEmpty && (!verifyOnly || report.moved.isEmpty),
                                                   summary: self.status, moved: report.moved, missing: report.missing, problems: report.problems, log: log.lines))
                 } else if !verifyOnly {
-                    self.showReport()
+                    self.notify(report)
                 }
             }
         }
@@ -162,18 +247,23 @@ final class AppState: ObservableObject {
 
     func undo() { restore(SnapshotStore.previousStateName, isUndo: true) }
 
-    // MARK: 결과 보고
+    // MARK: 결과 보고 (기획서 12.5)
 
-    func showReport() {
-        guard let report = lastReport else { return }
-        let alert = NSAlert()
-        alert.messageText = report.summary
-        var lines: [String] = []
-        if !report.problems.isEmpty { lines.append("⚠️ 문제\n" + report.problems.map { "• \($0)" }.joined(separator: "\n")) }
-        if !report.missing.isEmpty { lines.append("❌ 찾지 못한 창\n" + report.missing.map { "• \($0)" }.joined(separator: "\n")) }
-        alert.informativeText = lines.isEmpty ? "모든 창이 제자리입니다." : lines.joined(separator: "\n\n")
-        NSApp.activate()
-        alert.runModal()
+    /// 알림 배너로 요약을 보여 준다. 알림이 허용되지 않았으면 결과 창을 연다. 알림을 누르면 결과 창이 열린다 (AppDelegate)
+    private func notify(_ report: RestoreReport) {
+        let center = UNUserNotificationCenter.current()
+        let title = lastReportName
+        let body = ([report.summary] + report.problems.prefix(2) + report.missing.prefix(2).map { "없음: \($0)" }).joined(separator: "\n")
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else {
+                Task { @MainActor in AppState.shared.open(.result) }
+                return
+            }
+            let content = UNMutableNotificationContent()
+            content.title = "제자리: \(title)"
+            content.body = body
+            center.add(UNNotificationRequest(identifier: "restore-result", content: content, trigger: nil))
+        }
     }
 
     // MARK: 권한

@@ -38,20 +38,27 @@ enum SnapshotStore {
         try decoder.decode(Snapshot.self, from: Data(contentsOf: url(for: name)))
     }
 
-    /// 저장된 스냅샷 이름 (최근 것부터). 직전 상태는 뺀다
-    static func names() -> [String] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+    /// 저장된 스냅샷 (최근 것부터). 직전 상태는 뺀다
+    static func all() -> [Snapshot] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         return files.filter { $0.pathExtension == "json" }
-            .sorted {
-                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return a > b
-            }
-            .compactMap { (try? load($0.deletingPathExtension().lastPathComponent))?.name }
-            .filter { $0 != previousStateName }
+            .compactMap { try? decoder.decode(Snapshot.self, from: Data(contentsOf: $0)) }
+            .filter { $0.name != previousStateName }
+            .sorted { $0.createdAt > $1.createdAt }
     }
+
+    static func names() -> [String] { all().map(\.name) }
 
     static func exists(_ name: String) -> Bool { FileManager.default.fileExists(atPath: url(for: name).path) }
 
     static func delete(_ name: String) throws { try FileManager.default.removeItem(at: url(for: name)) }
+
+    /// 이름 바꾸기. 같은 이름이 이미 있으면 실패
+    static func rename(_ name: String, to newName: String) throws {
+        guard !exists(newName) else { throw CocoaError(.fileWriteFileExists) }
+        var snapshot = try load(name)
+        snapshot.name = newName
+        try save(snapshot)
+        try delete(name)
+    }
 }
