@@ -1,0 +1,11 @@
+# XcodeGen 생성물
+Jejari.xcodeproj/
+# 빌드
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+# 개발자별 서명 설정
+Configs/Signing.local.xcconfig
+# project.yml에서 생성
+Jejari/Info.plist
