@@ -1,7 +1,7 @@
 import AppKit
 
 /// 불러오기 결과 (기획서 12.5 결과 보고)
-struct RestoreReport {
+struct RestoreReport: Codable {
     var moved: [String] = []
     var alreadyInPlace = 0
     var missing: [String] = []      // 저장된 창과 짝이 없음 (앱이 꺼져 있거나 창이 없음)
@@ -18,7 +18,7 @@ struct RestoreReport {
 
 /// 불러오기 모드 (기획서 12.1)
 enum RestoreMode: String {
-    case full       // ② 전체 복원: 꺼진 앱 실행, 창 없는 앱에 다시 열기 요청, 브라우저 URL 열기, 뜬 창부터 배치
+    case full       // ② 전체 복원: 꺼진 앱 실행, 창 없는 앱에 다시 열기 요청, 브라우저 URL·JetBrains 프로젝트 열기, 뜬 창부터 배치
     case arrange    // ① 배치만: 이미 열린 창만 옮긴다
 }
 
@@ -167,7 +167,9 @@ final class Restorer: @unchecked Sendable {
         var unresponsive = Set<String>()
         var countSince: [String: (count: Int, since: Date)] = [:]
         var reopened = Set<String>(), chromeOpened = Set<Int>()
-        var gaveUp = Set<String>()   // 더 기다려도 창이 생기지 않을 앱 (예: "실행만"인 PhpStorm 시작 화면)
+        var gaveUp = Set<String>()   // 더 기다려도 창이 생기지 않을 앱
+        var placedIndexes = Set<Int>(), projectOpened = Set<Int>()
+        var lastProjectOpen: (index: Int, at: Date)?
         var lastProgress = Date()
         let start = Date()
 
@@ -195,6 +197,7 @@ final class Restorer: @unchecked Sendable {
                     || (Date().timeIntervalSince(launchedAt[bundleId]!) > 5 && Date().timeIntervalSince(countSince[bundleId]!.since) > 4)
                 let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, allowWeak: stable)
                 for pair in pairs {
+                    placedIndexes.insert(pair.savedIndex)
                     used.insert(pair.live.windowID)
                     place(windows[pair.savedIndex], pair.live)
                     lastProgress = Date()
@@ -205,8 +208,11 @@ final class Restorer: @unchecked Sendable {
                 // 앱이 자리 잡았는데(창 수 15초 그대로, 띄운 지 20초 이상) 입력 대기도 아니고 할 수 있는 요청도 다 했으면 그 앱은 그만 기다린다
                 let settled = Date().timeIntervalSince(countSince[bundleId]!.since) > 15
                     && Date().timeIntervalSince(launchedAt[bundleId] ?? .distantPast) > 20
-                let triedAll = (reopened.contains(bundleId) || !live.isEmpty || bundleId == BrowserService.chrome)
+                let isJetBrains = JetBrainsService.isJetBrains(bundleId)
+                let triedAll = (reopened.contains(bundleId) || !live.isEmpty || bundleId == BrowserService.chrome || isJetBrains)
                     && left.allSatisfy { chromeOpened.contains($0) || (windows[$0].urls ?? []).isEmpty }
+                    && left.allSatisfy { projectOpened.contains($0) || !WindowMatcher.isProjectTitle(windows[$0]) }
+                    && Date().timeIntervalSince(lastProjectOpen?.at ?? .distantPast) > 15
                 if mode == .full, !left.isEmpty, settled, triedAll, blockers.isEmpty, responding {
                     gaveUp.insert(bundleId)
                     report.missing += left.map { "\(windows[$0].appName) \"\(windows[$0].title)\" (앱을 실행했지만 이 창이 열리지 않음)" }
@@ -216,10 +222,25 @@ final class Restorer: @unchecked Sendable {
 
                 // ② 창이 하나도 없는 앱(마지막 창을 닫은 앱 등)에 한 번 다시 열기 요청
                 if mode == .full, !left.isEmpty, live.isEmpty, blockers.isEmpty, stable, !reopened.contains(bundleId),
-                   bundleId != BrowserService.chrome, let path = apps.first?.bundleURL?.path {
+                   bundleId != BrowserService.chrome, !isJetBrains, let path = apps.first?.bundleURL?.path {
                     reopened.insert(bundleId)
                     progress("\(windows[indexes[0]].appName): 창이 없어 다시 열기 요청")
                     reopen(path)
+                }
+                // ② JetBrains: 없는 프로젝트 창을 최근 프로젝트 목록에서 찾아 하나씩 연다. 앞서 연 창이 뜨거나 15초가 지나야 다음 것.
+                // 입력 대기(SVN 인증 등) 중이면 열지 않고 뒤로 미룬다
+                let previousDone = lastProjectOpen.map { placedIndexes.contains($0.index) || Date().timeIntervalSince($0.at) > 15 } ?? true
+                if mode == .full, isJetBrains, blockers.isEmpty, responding, previousDone,
+                   let i = left.first(where: { WindowMatcher.isProjectTitle(windows[$0]) && !projectOpened.contains($0) }) {
+                    projectOpened.insert(i)
+                    let project = WindowMatcher.titleKey(windows[i].title)
+                    if let path = JetBrainsService.projectPath(appName: windows[i].appName, project: project), let appPath = apps.first?.bundleURL?.path {
+                        lastProjectOpen = (i, Date())
+                        progress("\(windows[i].appName) 프로젝트 열기: \(project)")
+                        JetBrainsService.open(project: path, appPath: appPath)
+                    } else {
+                        progress("\(windows[i].appName): 최근 프로젝트에서 \(project) 경로를 찾지 못함")
+                    }
                 }
                 // ② Chrome: 세션 복원을 5초 기다린 뒤에도 같은 사이트 창이 없으면 저장한 URL로 한 번 연다
                 if mode == .full, bundleId == BrowserService.chrome, Date().timeIntervalSince(launchedAt[bundleId] ?? .distantPast) > 5 {

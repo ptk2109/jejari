@@ -50,8 +50,8 @@ enum WindowMatcher {
         return key
     }
 
-    private static func isProjectTitle(_ window: SavedWindow) -> Bool { isProjectTitle(window.bundleId, window.title) }
-    private static func isProjectTitle(_ bundleId: String, _ title: String) -> Bool {
+    static func isProjectTitle(_ window: SavedWindow) -> Bool { isProjectTitle(window.bundleId, window.title) }
+    static func isProjectTitle(_ bundleId: String, _ title: String) -> Bool {
         bundleId.hasPrefix("com.jetbrains.") && (title.contains(" – ") || title.contains(" ["))
     }
 

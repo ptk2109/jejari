@@ -256,12 +256,23 @@ final class AppState: ObservableObject {
         busy = true
         status = verifyOnly ? "\"\(name)\" 검증 중…" : "\"\(name)\" 불러오는 중… 키보드와 마우스에서 손을 떼 주세요"
         Task.detached {
-            if !isUndo && !verifyOnly { try? SnapshotStore.save(WindowService.capture(name: SnapshotStore.previousStateName)) }
+            let startedAt = Date()
+            // 불러오기 직전 상태: 되돌리기용으로 저장하고, 기록에도 남긴다
+            var before: Snapshot?
+            if !verifyOnly && (!isUndo || RunLogStore.isEnabled) {
+                before = WindowService.capture(name: SnapshotStore.previousStateName)
+                if !isUndo, let before { try? SnapshotStore.save(before) }
+            }
             let log = LogBox()
             let report = Restorer(snapshot: snapshot, mode: mode, dryRun: verifyOnly) { message in
                 log.append(message)
                 Task { @MainActor in self.status = message }
             }.run()
+            if !verifyOnly && RunLogStore.isEnabled {
+                let after = WindowService.capture(name: name)
+                RunLogStore.record(.init(snapshot: isUndo ? "되돌리기" : name, mode: mode.rawValue, startedAt: startedAt, finishedAt: Date(),
+                                         report: report, log: log.lines), before: before, after: after)
+            }
             await MainActor.run {
                 self.busy = false
                 self.status = verifyOnly ? "검증: 제자리 \(report.alreadyInPlace)개, 다름 \(report.moved.count)개, 없음 \(report.missing.count)개" : report.summary
