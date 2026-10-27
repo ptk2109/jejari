@@ -11,6 +11,11 @@ struct ManageView: View {
     /// 여러 개 지우기용 체크 (행을 고르는 selection과 따로)
     @State private var checked = Set<String>()
     @State private var deletingChecked = false
+    /// 오른쪽 설정 편집 중인 값. [저장]을 눌러야 파일에 반영된다
+    @State private var editPolicy: OtherAppsPolicy = .keep
+    @State private var editTidy = false
+    @State private var editStrategy: SpaceStrategy = .auto
+    @State private var savedNotice = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -44,12 +49,10 @@ struct ManageView: View {
                 }
                 .frame(width: 380)
                 ScrollView {
-                    if let selection, let snapshot = state.snapshots.first(where: { $0.name == selection }) {
+                    if let selection, state.snapshots.contains(where: { $0.name == selection }) {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("\"\(selection)\" 불러올 때").font(.title3.bold())
-                            OtherAppsPicker(policy: Binding(get: { snapshot.otherAppsPolicy }, set: { state.setOtherApps(selection, $0) }),
-                                            tidySpaces: Binding(get: { snapshot.tidySpaces ?? false }, set: { state.setTidySpaces(selection, $0) }),
-                                            strategy: Binding(get: { snapshot.spaceStrategy ?? .auto }, set: { state.setSpaceStrategy(selection, $0) }))
+                            OtherAppsPicker(policy: $editPolicy, tidySpaces: $editTidy, strategy: $editStrategy)
                         }
                         .padding(.trailing, 8)
                     } else {
@@ -74,6 +77,17 @@ struct ManageView: View {
                 Button("체크한 \(checked.count)개 삭제", role: .destructive) { deletingChecked = true }
                     .disabled(checked.isEmpty)
                 Spacer()
+                if isDirty {
+                    Text("바뀐 내용이 있어요").font(.callout).foregroundStyle(.orange)
+                } else if !savedNotice.isEmpty {
+                    Text(savedNotice).font(.callout).foregroundStyle(.green)
+                }
+                Button("취소") { loadSettings(selection) }
+                    .disabled(!isDirty)
+                Button("저장") { saveSettings(selection) }
+                    .keyboardShortcut("s")
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!isDirty)
                 Button("폴더 열기") {
                     try? FileManager.default.createDirectory(at: SnapshotStore.directory, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(SnapshotStore.directory)
@@ -82,7 +96,17 @@ struct ManageView: View {
         }
         .padding(20)
         .frame(width: 1000, height: 760)
-        .onAppear { state.reload() }
+        .onAppear { state.reload(); loadSettings(selection) }
+        // 다른 배치를 고르면: 저장 안 한 변경은 앞서 고른 배치에 자동 저장하고 새 배치 설정을 불러온다
+        .onChange(of: selection) { old, new in
+            if let old, isDirty(for: old) {
+                saveSettings(old)
+                savedNotice = "\"\(old)\" 설정을 저장했어요"
+            } else {
+                savedNotice = ""
+            }
+            loadSettings(new)
+        }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("새 이름", text: $newName)
             Button("바꾸기") {
@@ -120,6 +144,28 @@ struct ManageView: View {
         Button("복제") { selection = state.duplicate(name) ?? name }
         Button("이름 바꾸기") { startRename(name) }
         Button("삭제", role: .destructive) { deleting = name }
+    }
+
+    private func current(_ name: String?) -> Snapshot? { state.snapshots.first { $0.name == name } }
+
+    private func loadSettings(_ name: String?) {
+        guard let snapshot = current(name) else { return }
+        editPolicy = snapshot.otherAppsPolicy
+        editTidy = snapshot.tidySpaces ?? false
+        editStrategy = snapshot.spaceStrategy ?? .auto
+    }
+
+    private func isDirty(for name: String) -> Bool {
+        guard let snapshot = current(name) else { return false }
+        return editPolicy != snapshot.otherAppsPolicy || editTidy != (snapshot.tidySpaces ?? false) || editStrategy != (snapshot.spaceStrategy ?? .auto)
+    }
+
+    private var isDirty: Bool { selection.map(isDirty(for:)) ?? false }
+
+    private func saveSettings(_ name: String?) {
+        guard let name else { return }
+        state.saveSettings(name, policy: editPolicy, tidySpaces: editTidy, strategy: editStrategy)
+        savedNotice = "저장했어요"
     }
 
     private func startRename(_ name: String) {

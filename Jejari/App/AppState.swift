@@ -54,7 +54,11 @@ final class AppState: ObservableObject {
     /// 값이 실제로 바뀔 때만 갱신한다. 메뉴바 메뉴는 상태가 바뀔 때마다 다시 그려져서 열린 하위 메뉴가 닫히기 때문
     func reload() {
         let loaded = SnapshotStore.all()
-        if loaded.map({ "\($0.name)|\($0.createdAt)|\($0.includedWindows.count)" }) != snapshots.map({ "\($0.name)|\($0.createdAt)|\($0.includedWindows.count)" }) {
+        // 설정 값도 비교에 넣는다 (빠뜨리면 설정을 바꿔도 화면이 예전 값을 보여 줌)
+        func signature(_ s: Snapshot) -> String {
+            "\(s.name)|\(s.createdAt)|\(s.includedWindows.count)|\(s.otherAppsPolicy)|\(s.tidySpaces ?? false)|\(s.spaceStrategy ?? .auto)"
+        }
+        if loaded.map(signature) != snapshots.map(signature) {
             snapshots = loaded
         }
         refreshChecks()
@@ -284,6 +288,16 @@ final class AppState: ObservableObject {
     }
 
     /// 다른 앱 처리 바꾸기
+    /// 불러올 때 설정 세 가지를 한 번에 저장
+    func saveSettings(_ name: String, policy: OtherAppsPolicy, tidySpaces: Bool, strategy: SpaceStrategy) {
+        guard var snapshot = try? SnapshotStore.load(name) else { return }
+        snapshot.otherAppsPolicy = policy
+        snapshot.tidySpaces = tidySpaces ? true : nil
+        snapshot.spaceStrategy = strategy == .auto ? nil : strategy
+        try? SnapshotStore.save(snapshot)
+        reload()
+    }
+
     func setOtherApps(_ name: String, _ policy: OtherAppsPolicy) {
         guard var snapshot = try? SnapshotStore.load(name) else { return }
         snapshot.otherAppsPolicy = policy
