@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-27
+
 ### 변경
 
 - 배치 저장 창: 이름을 목록에서 고른다. 기존 배치를 고르면 덮어쓰고, "＋ 새 배치…"를 고르면 이름을 입력한다. 처음에는 마지막으로 불러온 배치가 골라져 있다
@@ -53,6 +55,7 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ptk2109/jejari/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ptk2109/jejari/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ptk2109/jejari/releases/tag/v0.1.0
