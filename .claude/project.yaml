@@ -3,7 +3,7 @@ name: jejari
 type: app
 stack: [swift, swiftui, appkit]
 platform: macos-15+
-repo: ""        # GitHub 생성 후 입력
+repo: https://github.com/ptk2109/jejari
 commands:
   build: ""     # Xcode 프로젝트 생성 후 입력
   test: ""
