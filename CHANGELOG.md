@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-28
+
+### 수정
+
+- ② 전체 복원에서 창을 열어 달라고 한 직후에 그 앱을 포기해, 늦게 뜬 창(Xcode 문서, DataGrip 프로젝트, NateOn 등)을 "없음"으로 보고하던 문제. 이제 요청 뒤 30초는 기다린다
+- JetBrains 프로젝트를 여러 앱(PhpStorm, DataGrip 등)에 걸쳐 하나씩만 열어 뒤 앱이 늦게 시작되던 문제. 이제 앱마다 따로 연다
+- 입력을 기다리는 동안 진행 기록에 "입력 대기 → 뒤로 미룸"이 반복해서 남던 문제
+
 ## [0.5.0] - 2026-10-28
 
 ### 추가
@@ -83,7 +91,8 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/ptk2109/jejari/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ptk2109/jejari/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ptk2109/jejari/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ptk2109/jejari/compare/v0.2.0...v0.3.0
