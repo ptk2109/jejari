@@ -1,0 +1,89 @@
+# 제자리 (Jejari)
+
+macOS 메뉴바 앱. 지금 열린 창의 배치(모니터, 가상화면, 위치, 크기)를 저장해 두었다가, 한 번에 원래 자리로 돌려놓는다.
+
+> 이름의 뜻: 흩어진 창을 늘 있던 "제자리"로.
+
+재부팅하거나 모니터를 뺐다 꽂으면 창이 한 화면에 몰리거나 가상화면 배치가 흐트러진다. 제자리는 기존 창 배치 도구가 하지 못하는 **가상화면(Spaces)까지** 되돌린다.
+
+## 주요 기능
+
+- **저장**: 모든 가상화면의 창을 모아 이름 붙여 저장. 저장할 창을 체크박스로 고른다
+- **불러오기**
+  - ② 전체 복원: 꺼진 앱을 실행하고, 창을 저장한 모니터·가상화면·위치·크기로 옮긴다. 겹친 순서도 맞춘다
+  - ① 배치만: 이미 열린 창만 옮긴다
+  - 가상화면이 모자라면 만들고, 모니터가 없으면 비슷한 모니터에 가상화면을 붙여 대신 놓는다
+  - Chrome 창은 저장한 탭 주소로, JetBrains IDE는 최근 프로젝트에서 찾아 다시 연다
+  - 로그인·인증 창처럼 입력을 기다리는 앱은 뒤로 미루고 다른 앱부터 놓는다
+- **배치마다 불러올 때 설정**: 배치에 없는 앱(그대로 / 보관 화면으로 / 숨기기 / 종료 요청), 가상화면 맞추는 방식(자동 / 필요한 것만 / 초기화 후 다시 만들기), 남는 가상화면 정리
+- **되돌리기**: 불러오기 직전 상태로
+- **정리하기**: 🧲 한 화면으로 모으기, 🧹 깨끗하게 비우기
+- **설정 점검**: 필요한 권한과 macOS 설정을 확인하고 권장값으로 맞춤
+
+## 요구 사항
+
+- macOS 15 이상 (macOS 27.0.1, 27.2에서 확인)
+- 손쉬운 사용 권한 (필수), Chrome 탭 주소를 저장하려면 자동화 권한 (선택)
+
+## 설치
+
+아직 서명·공증된 배포판이 없다. 소스에서 빌드한다.
+
+```sh
+brew install xcodegen
+git clone https://github.com/ptk2109/jejari.git && cd jejari
+# 서명 Team (Xcode → 설정 → Accounts의 Apple Development 인증서). 커밋하지 않는 파일
+echo 'DEVELOPMENT_TEAM = <Team ID>' > Configs/Signing.local.xcconfig
+xcodegen generate
+xcodebuild -project Jejari.xcodeproj -scheme Jejari -configuration Release -derivedDataPath build -allowProvisioningUpdates build
+open build/Build/Products/Release/Jejari.app
+```
+
+같은 Team으로 서명하면 다시 빌드해도 손쉬운 사용 권한이 유지된다.
+
+## 처음 설정
+
+1. 메뉴바 아이콘 → **⚙️ 설정 점검…**
+2. **손쉬운 사용 권한**: [설정 열기] → 목록에서 제자리를 켠다
+3. 나머지 항목은 [권장대로]로 맞춘다
+   - **Spaces 자동 재정렬 끄기**: 켜져 있으면 가상화면 순서가 저절로 바뀐다
+   - **데스크톱 전환 단축키**: 가상화면을 옮길 때 쓴다 (⌃1~⌃0, ⌃⌥1~⌃⌥6. 다른 앱 단축키와 겹치면 주의)
+4. Chrome 탭 주소를 저장하려면 처음 저장할 때 뜨는 "Chrome 제어" 요청을 허용한다
+
+## 사용법
+
+| 메뉴 | 하는 일 |
+|---|---|
+| 📸 현재 배치 저장… | 이름, 불러올 때 설정, 저장할 창을 고르고 저장 |
+| 📂 불러오기 ▸ 배치 ▸ ② / ① | 전체 복원 / 배치만 |
+| ↩️ 되돌리기 | 불러오기 직전 배치로 (배치만) |
+| 🗂 배치 관리… | 이름·설정 수정, 창 고르기, 복제, 여러 개 삭제 |
+| 🧰 정리하기 | 한 화면으로 모으기 / 깨끗하게 비우기 |
+| 마지막 결과 보기 | 옮긴 창, 문제, 찾지 못한 창 |
+
+스크립트나 단축어에서는 URL로 부를 수 있다.
+
+```sh
+open "jejari://save?name=회사"
+open "jejari://restore?name=회사&mode=full"   # mode=arrange 이면 배치만
+open "jejari://undo"
+```
+
+결과는 `~/Library/Application Support/Jejari/last-result.json`에 남는다.
+
+## 저장 위치
+
+- 배치: `~/Library/Application Support/Jejari/snapshots/<이름>.json`
+- 불러오기 기록(최근 20개): `~/Library/Application Support/Jejari/logs/`
+
+## 알려진 제한
+
+- macOS는 가상화면을 다루는 공개 기능을 제공하지 않는다. 제자리는 비공개 API(SkyLight, 원격 AX 요소, 가상 모니터)를 쓰므로 **App Store로 배포할 수 없고**, macOS 업데이트 때 동작이 바뀔 수 있다
+- 가상화면 순서 자체는 바꿀 수 없어서 창을 옮겨 맞춘다
+- 모니터가 1대일 때는 임시 가상 모니터를 거쳐 창을 옮긴다. 이때 화면이 잠깐 깜빡인다
+- 불러오는 동안 화면 전환과 키 입력이 있으니 키보드와 마우스를 쓰지 않는다
+- "실행만"이라 앱이 스스로 다시 열지 않는 창(닫은 문서 등)은 열리지 않는다
+
+## 변경 기록
+
+[CHANGELOG.md](CHANGELOG.md)
