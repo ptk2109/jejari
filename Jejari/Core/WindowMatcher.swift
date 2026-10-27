@@ -24,7 +24,8 @@ enum WindowMatcher {
         var score = 0
         // 브라우저: 저장한 탭들의 사이트와 지금 보고 있는 탭(AXDocument)의 사이트를 비교
         // URL이 없는 창(프로필 선택 창, 빈 창)은 저장된 브라우저 창과 짝짓지 않는다
-        if let urls = saved.urls, !urls.isEmpty {
+        let urls = saved.tabURLs
+        if !urls.isEmpty {
             guard let host = URL(string: live.document)?.host else { return nil }
             let hosts = Set(urls.compactMap { URL(string: $0)?.host })
             if !hosts.contains(host) { return nil }
@@ -88,8 +89,8 @@ enum WindowMatcher {
 }
 
 extension Snapshot {
-    /// 같은 이름으로 다시 저장할 때 기존 배치에서 이어받는다: 불러올 때 설정, 뺀 앱, 뺀 창.
-    /// 뺀 창은 강한 단서로 짝지어진 창만 이어받는다 (약한 단서로 엉뚱한 창을 빼지 않게)
+    /// 같은 이름으로 다시 저장할 때 기존 배치에서 이어받는다: 불러올 때 설정, 뺀 앱, 창마다 포함 여부.
+    /// 창은 강한 단서로 짝지어진 것만 이어받는다 (약한 단서로 엉뚱한 창을 빼지 않게). 짝이 없는 새 창은 찍은 그대로
     func inheriting(from old: Snapshot) -> Snapshot {
         var result = self
         result.otherApps = old.otherApps
@@ -99,7 +100,7 @@ extension Snapshot {
         for index in result.apps.indices where excludedApps.contains(result.apps[index].bundleId) {
             result.apps[index].isIncluded = false
         }
-        for bundleId in Set(old.windows.filter { !$0.isIncluded }.map(\.bundleId)) {
+        for bundleId in Set(old.windows.map(\.bundleId)) {
             let olds = old.windows.indices.filter { old.windows[$0].bundleId == bundleId }
             let news = result.windows.indices.filter { result.windows[$0].bundleId == bundleId }
             var candidates: [(old: Int, new: Int, score: Int)] = []
@@ -114,7 +115,7 @@ extension Snapshot {
             for candidate in candidates.sorted(by: { $0.score > $1.score }) where !usedOld.contains(candidate.old) && !usedNew.contains(candidate.new) {
                 usedOld.insert(candidate.old)
                 usedNew.insert(candidate.new)
-                if !old.windows[candidate.old].isIncluded { result.windows[candidate.new].isIncluded = false }
+                result.windows[candidate.new].isIncluded = old.windows[candidate.old].isIncluded
             }
         }
         return result

@@ -129,4 +129,18 @@ struct SavedWindow: Codable {
         get { excluded != true }
         set { excluded = newValue ? nil : true }
     }
+
+    /// 브라우저 창을 알아보고 다시 열 때 쓰는 탭 주소. 탭 목록을 못 읽었으면(권한 없음 등) 보고 있던 탭 주소 하나
+    var tabURLs: [String] {
+        if let urls, !urls.isEmpty { return urls }
+        guard bundleId == BrowserService.chrome, ["http", "https"].contains(URL(string: document)?.scheme?.lowercased()) else { return [] }
+        return [document]
+    }
+
+    /// 창이 보여 주던 파일 (Xcode, 텍스트 편집기 등). 지금도 있을 때만. 브라우저의 file:// 주소는 탭으로 다룬다
+    var filePath: String? {
+        guard bundleId != BrowserService.chrome, let url = URL(string: document), url.isFileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url.path
+    }
 }

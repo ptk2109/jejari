@@ -234,6 +234,8 @@ final class Restorer: @unchecked Sendable {
 
     /// 앱을 띄운 시각. 이때부터 몇 초 동안은 창이 덜 떠서 약한 단서 매칭을 미룬다
     private var launchedAt: [String: Date] = [:]
+    /// 열어 달라고 한 파일. 앱을 실행할 때 같이 열었거나, 실행 중인 앱에 나중에 열어 달라고 한 것
+    private var openedDocuments = Set<String>()
 
     /// 포함된 앱 중 꺼진 것을 뒤에서 실행한다 (앞으로 가져오지 않음)
     private func launchApps() {
@@ -246,9 +248,17 @@ final class Restorer: @unchecked Sendable {
             }
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = false
-            NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: configuration)
+            // 파일을 보여 주던 창이 있으면 그 파일로 실행한다. 빈 채로 띄우면 파일 열기 창부터 뜨는 앱이 있어서 (텍스트 편집기, 미리보기)
+            let documents = snapshot.includedWindows.filter { $0.bundleId == app.bundleId }.compactMap(\.filePath)
+            if documents.isEmpty {
+                NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: configuration)
+                progress("\(app.name) 실행")
+            } else {
+                NSWorkspace.shared.open(documents.map { URL(fileURLWithPath: $0) }, withApplicationAt: URL(fileURLWithPath: app.path), configuration: configuration)
+                openedDocuments.formUnion(documents)
+                progress("\(app.name) 실행 (문서 \(documents.count)개)")
+            }
             launchedAt[app.bundleId] = Date()
-            progress("\(app.name) 실행")
         }
     }
 
@@ -344,8 +354,10 @@ final class Restorer: @unchecked Sendable {
         let settled = Date().timeIntervalSince(countStableSince) > 15
             && Date().timeIntervalSince(launchedAt[bundleId] ?? .distantPast) > 20
         let isJetBrains = JetBrainsService.isJetBrains(bundleId)
-        let triedAll = (state.reopened.contains(bundleId) || !live.isEmpty || bundleId == BrowserService.chrome || isJetBrains)
-            && left.allSatisfy { state.chromeOpened.contains($0) || (windows[$0].urls ?? []).isEmpty }
+        let hasDocuments = left.contains { windows[$0].filePath != nil }
+        let triedAll = (state.reopened.contains(bundleId) || !live.isEmpty || bundleId == BrowserService.chrome || isJetBrains || hasDocuments)
+            && left.allSatisfy { state.chromeOpened.contains($0) || windows[$0].tabURLs.isEmpty }
+            && left.allSatisfy { windows[$0].filePath.map(openedDocuments.contains) ?? true }
             && left.allSatisfy { state.projectOpened.contains($0) || !WindowMatcher.isProjectTitle(windows[$0]) }
             && Date().timeIntervalSince(state.lastProjectOpen?.at ?? .distantPast) > 15
         if settled, triedAll, blockers.isEmpty, scan.responding {
@@ -361,9 +373,16 @@ final class Restorer: @unchecked Sendable {
     private func requestMissingWindows(_ bundleId: String, _ left: [Int], _ windows: [SavedWindow], app: NSRunningApplication,
                                        hasWindows: Bool, waitingInput: Bool, responding: Bool, stable: Bool, _ state: inout Placement) {
         let isJetBrains = JetBrainsService.isJetBrains(bundleId)
-        // 창이 하나도 없는 앱(마지막 창을 닫은 앱 등)에 한 번 다시 열기 요청
+        // 실행 중인 앱에서 파일을 보여 주던 창(Xcode 등)이 없으면 그 파일을 연다. 앱 다시 열기로는 시작 화면만 뜨는 앱이 있어서
+        let documents = Set(left.compactMap { windows[$0].filePath }).subtracting(openedDocuments)
+        if !isJetBrains, !waitingInput, stable, responding, !documents.isEmpty, let appPath = app.bundleURL?.path {
+            openedDocuments.formUnion(documents)
+            progress("\(windows[left[0]].appName) 문서 열기: \(documents.map { ($0 as NSString).lastPathComponent }.sorted().joined(separator: ", "))")
+            ExternalCommand.openInBackground(app: appPath, documents.sorted())
+        }
+        // 창이 하나도 없는 앱(마지막 창을 닫은 앱 등)에 한 번 다시 열기 요청. 문서로 열 창이 있으면 그것으로 충분
         if !hasWindows, !waitingInput, stable, !state.reopened.contains(bundleId), bundleId != BrowserService.chrome, !isJetBrains,
-           let path = app.bundleURL?.path {
+           !left.contains(where: { windows[$0].filePath != nil }), let path = app.bundleURL?.path {
             state.reopened.insert(bundleId)
             progress("\(windows[left[0]].appName): 창이 없어 다시 열기 요청")
             reopen(path)
@@ -385,7 +404,8 @@ final class Restorer: @unchecked Sendable {
         // Chrome: 세션 복원을 5초 기다린 뒤에도 같은 사이트 창이 없으면 저장한 URL로 한 번 연다
         if bundleId == BrowserService.chrome, Date().timeIntervalSince(launchedAt[bundleId] ?? .distantPast) > 5 {
             for i in left where !state.chromeOpened.contains(i) {
-                guard let urls = windows[i].urls, !urls.isEmpty else { continue }
+                let urls = windows[i].tabURLs
+                guard !urls.isEmpty else { continue }
                 state.chromeOpened.insert(i)
                 progress("Chrome 창 열기: \(urls[0]) 외 \(urls.count - 1)개")
                 BrowserService.openChromeWindow(urls)
