@@ -11,12 +11,15 @@ enum SnapshotStore {
     }
 
     private static func url(for name: String) -> URL {
-        // 파일 이름에 쓸 수 없는 문자는 바꾼다
-        let safe = name.replacingOccurrences(of: "/", with: "／").replacingOccurrences(of: ":", with: "：")
-        return directory.appendingPathComponent("\(safe).json")
+        directory.appendingPathComponent("\(fileName(name)).json")
     }
 
-    private static let encoder: JSONEncoder = {
+    /// 파일 이름에 쓸 수 없는 문자는 바꾼다 (폴더를 넘나들지 않게)
+    static func fileName(_ name: String) -> String {
+        name.replacingOccurrences(of: "/", with: "／").replacingOccurrences(of: ":", with: "：")
+    }
+
+    static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

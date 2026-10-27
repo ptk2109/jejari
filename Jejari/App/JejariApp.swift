@@ -19,37 +19,37 @@ struct JejariApp: App {
         Window("배치 저장", id: AppWindow.save.rawValue) {
             SaveView().environmentObject(state)
         }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
-        .handlesExternalEvents(matching: [])  // jejari:// URL을 받을 때 SwiftUI가 이 창을 여는 것을 막음 (URL은 AppDelegate가 처리)
+        .menuBarAppWindow()
 
         Window("배치 창 고르기", id: AppWindow.edit.rawValue) {
             EditView().environmentObject(state)
         }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
-        .handlesExternalEvents(matching: [])  // jejari:// URL을 받을 때 SwiftUI가 이 창을 여는 것을 막음 (URL은 AppDelegate가 처리)
+        .menuBarAppWindow()
 
         Window("배치 관리", id: AppWindow.manage.rawValue) {
             ManageView().environmentObject(state)
         }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
-        .handlesExternalEvents(matching: [])  // jejari:// URL을 받을 때 SwiftUI가 이 창을 여는 것을 막음 (URL은 AppDelegate가 처리)
+        .menuBarAppWindow()
 
         Window("불러오기 결과", id: AppWindow.result.rawValue) {
             ResultView().environmentObject(state)
         }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
-        .handlesExternalEvents(matching: [])  // jejari:// URL을 받을 때 SwiftUI가 이 창을 여는 것을 막음 (URL은 AppDelegate가 처리)
+        .menuBarAppWindow()
 
         Window("제자리 설정", id: AppWindow.settings.rawValue) {
             SettingsView().environmentObject(state)
         }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
-        .handlesExternalEvents(matching: [])  // jejari:// URL을 받을 때 SwiftUI가 이 창을 여는 것을 막음 (URL은 AppDelegate가 처리)
+        .menuBarAppWindow()
+    }
+}
+
+extension Scene {
+    /// 제자리 창 공통: 내용 크기에 맞추고, 실행할 때 자동으로 열지 않고(메뉴바 앱),
+    /// jejari:// URL을 받을 때 SwiftUI가 이 창을 여는 것을 막는다 (URL은 AppDelegate가 처리)
+    func menuBarAppWindow() -> some Scene {
+        windowResizability(.contentSize)
+            .defaultLaunchBehavior(.suppressed)
+            .handlesExternalEvents(matching: [])
     }
 }
 

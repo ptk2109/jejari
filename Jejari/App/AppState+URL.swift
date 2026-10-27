@@ -76,9 +76,7 @@ extension AppState {
     }
 
     func writeResult(_ result: ActionResult) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        let encoder = SnapshotStore.encoder
         try? FileManager.default.createDirectory(at: Self.resultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? encoder.encode(result).write(to: Self.resultURL, options: .atomic)
     }

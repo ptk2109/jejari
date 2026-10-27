@@ -68,7 +68,7 @@ private struct GeneralSettings: View {
                 }
 
                 OptionGroup(title: "불러오기 기록을 남길까요?", selection: Binding(get: { logging }, set: { on in
-                    UserDefaults.standard.set(on, forKey: "debugLogging")
+                    RunLogStore.isEnabled = on
                     logging = on
                 }), options: [
                     (true, "남기기", "불러올 때마다 직전 상태, 결과, 불러온 뒤 상태를 최근 20개까지 남겨요. 1~2초 더 걸려요.\n예) \"어제 불러오기가 이상했어\" 할 때 무엇이 어떻게 됐는지 찾아볼 수 있어요."),
