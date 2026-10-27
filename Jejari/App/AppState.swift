@@ -113,6 +113,14 @@ final class AppState: ObservableObject {
             writeResult(ActionResult(action: "status", name: "", finishedAt: Date(), ok: AXIsProcessTrusted(),
                                      summary: checks.map { "\($0.ok ? "✅" : "⚠️") \($0.title): \($0.detail)" }.joined(separator: "\n")))
         #if DEBUG
+        case "debugdrag":
+            // jejari://debugdrag?app=<bundle id 일부>&to=<번호>: 그 앱의 첫 창을 끌어서 다른 Space로
+            let app = query.first { $0.name == "app" }?.value ?? ""
+            let to = Int(query.first { $0.name == "to" }?.value ?? "") ?? 1
+            Task.detached {
+                let log = DebugTools.drag(appQuery: app, to: to)
+                await MainActor.run { self.writeResult(ActionResult(action: "debugdrag", name: app, finishedAt: Date(), ok: true, summary: "끌기 시험", log: log)) }
+            }
         case "scramble":
             guard AXIsProcessTrusted(), !busy else { return }
             busy = true

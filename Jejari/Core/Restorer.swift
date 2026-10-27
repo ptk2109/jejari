@@ -32,6 +32,8 @@ final class Restorer: @unchecked Sendable {
     private let progress: (String) -> Void
     private var displays: [String: CGRect] = [:]
     private var useUuid: [String: Bool] = [:]
+    /// 없는 모니터에 있던 Space 중 macOS가 다른 모니터로 옮겨 둔 것(uuid가 남아 있음). 이 창들은 uuid로 찾는다
+    private var followedUuids = Set<String>()
     private var report = RestoreReport()
 
     /// dryRun: 옮기지 않고 저장된 자리와 다른 창만 moved에 담는다 (검증용)
@@ -61,25 +63,46 @@ final class Restorer: @unchecked Sendable {
 
     // MARK: 없는 모니터 → 비슷한 모니터 (기획서 12.4 #16)
 
-    /// 없는 모니터마다 같은 크기(+2)·같은 모델명(+1)이 가장 높은 모니터를 고른다.
-    /// 없는 모니터의 Space i → 대체 모니터의 (원래 Space 수 + 앞서 붙인 수 + i)번, 창 위치는 모니터 안 비율 좌표로
+    /// 모니터를 빼면 macOS가 그 Space들을 남은 모니터로 옮긴다 (uuid 유지, 1번 Space는 주 모니터 1번에 합쳐져 사라짐. 0단계).
+    /// 1) 없는 모니터의 Space uuid가 다른 모니터에 있으면 그 Space를 그대로 쓴다
+    /// 2) uuid를 못 찾은 Space만 비슷한 모니터(같은 크기 +2, 같은 모델명 +1)의 Space 뒤에 새로 붙인다
+    /// 창 위치는 모니터 안 비율 좌표로 옮긴다
     private func substituteMissingDisplays(_ windows: inout [SavedWindow]) -> [String: Int] {
         var extra: [String: Int] = [:]
         let live = DisplayService.current()
-        for missing in snapshot.displays where displays[missing.uuid] == nil {
-            guard let target = live.max(by: { similarity($0, missing) < similarity($1, missing) }) else { continue }
-            let base = savedSpaceCount(target.uuid) + (extra[target.uuid] ?? 0)
-            extra[target.uuid, default: 0] += savedSpaceCount(missing.uuid)
-            progress("\(missing.name) 없음 → \(target.name)의 Space \(base + 1)번부터 대체")
+        let layout = SpaceService.layout()
+        func remap(_ i: Int, from missing: SavedDisplay, to target: LiveDisplay) {
+            let f = windows[i].frame
             let sx = target.frame.width / missing.frame.width, sy = target.frame.height / missing.frame.height
-            for i in windows.indices where windows[i].displayUuid == missing.uuid {
-                let f = windows[i].frame
-                windows[i].frame = CGRect(x: target.frame.minX + (f.minX - missing.frame.minX) * sx,
-                                          y: target.frame.minY + (f.minY - missing.frame.minY) * sy,
-                                          width: f.width * sx, height: f.height * sy)
-                windows[i].displayUuid = target.uuid
-                windows[i].spaceIndex += base
-                windows[i].spaceUuid = ""  // 새로 만드는 Space라 번호로 찾는다
+            windows[i].frame = CGRect(x: target.frame.minX + (f.minX - missing.frame.minX) * sx,
+                                      y: target.frame.minY + (f.minY - missing.frame.minY) * sy,
+                                      width: f.width * sx, height: f.height * sy)
+            windows[i].displayUuid = target.uuid
+        }
+        for missing in snapshot.displays where displays[missing.uuid] == nil {
+            let savedSpaces = snapshot.spaces.first { $0.displayUuid == missing.uuid }?.spaces ?? []
+            var notFound: [SavedSpace] = []
+            for space in savedSpaces {
+                if let home = layout.first(where: { $0.uuids.contains(space.uuid) }), let target = live.first(where: { $0.uuid == home.displayUuid }) {
+                    followedUuids.insert(space.uuid)
+                    for i in windows.indices where windows[i].displayUuid == missing.uuid && windows[i].spaceUuid == space.uuid {
+                        remap(i, from: missing, to: target)
+                    }
+                    progress("\(missing.name)의 가상화면 \(space.index) → \(target.name)에 옮겨져 있는 것을 사용")
+                } else {
+                    notFound.append(space)
+                }
+            }
+            guard !notFound.isEmpty, let target = live.max(by: { similarity($0, missing) < similarity($1, missing) }) else { continue }
+            let base = max(savedSpaceCount(target.uuid), layout.first { $0.displayUuid == target.uuid }?.ids.count ?? 0) + (extra[target.uuid] ?? 0)
+            extra[target.uuid, default: 0] += notFound.count
+            progress("\(missing.name)의 가상화면 \(notFound.map { String($0.index) }.joined(separator: ", ")) → \(target.name)의 \(base + 1)번부터 새로 만듦")
+            for (k, space) in notFound.enumerated() {
+                for i in windows.indices where windows[i].displayUuid == missing.uuid && (windows[i].spaceUuid == space.uuid || windows[i].spaceIndex == space.index && windows[i].spaceUuid.isEmpty) {
+                    remap(i, from: missing, to: target)
+                    windows[i].spaceIndex = base + k + 1
+                    windows[i].spaceUuid = ""  // 새로 만드는 Space라 번호로 찾는다
+                }
             }
         }
         return extra
@@ -100,8 +123,9 @@ final class Restorer: @unchecked Sendable {
     private func addMissingSpaces(_ extra: [String: Int]) {
         let layout = SpaceService.layout()
         for (display, frame) in displays {
-            let need = savedSpaceCount(display) + (extra[display] ?? 0)
             let have = layout.first { $0.displayUuid == display }?.ids.count ?? 0
+            // 대체로 붙이는 Space는 지금 있는 Space 뒤에 붙인다 (substituteMissingDisplays의 base와 같은 기준)
+            let need = extra[display] == nil ? savedSpaceCount(display) : max(savedSpaceCount(display), have) + extra[display]!
             guard need > have else { continue }
             let added = SpaceService.addSpaces(display: display, screen: frame, count: need - have)
             progress("Space \(have)개 → \(need)개 필요, \(added)개 추가")
@@ -122,7 +146,8 @@ final class Restorer: @unchecked Sendable {
 
     private func targetIndex(_ window: SavedWindow) -> Int {
         let uuids = SpaceService.layout().first { $0.displayUuid == window.displayUuid }?.uuids ?? []
-        if useUuid[window.displayUuid] == true, !window.spaceUuid.isEmpty, let i = uuids.firstIndex(of: window.spaceUuid) { return i + 1 }
+        if useUuid[window.displayUuid] == true || followedUuids.contains(window.spaceUuid),
+           !window.spaceUuid.isEmpty, let i = uuids.firstIndex(of: window.spaceUuid) { return i + 1 }
         return min(window.spaceIndex, max(uuids.count, 1))
     }
 
@@ -284,7 +309,7 @@ final class Restorer: @unchecked Sendable {
             return
         }
         let index = targetIndex(saved)
-        if index != saved.spaceIndex && useUuid[saved.displayUuid] != true {
+        if index != saved.spaceIndex && useUuid[saved.displayUuid] != true && !followedUuids.contains(saved.spaceUuid) {
             report.problems.append("\(name): Space \(saved.spaceIndex)번이 없어 \(index)번에 둠")
         }
         let now = SpaceService.location(of: live.windowID)
@@ -306,14 +331,23 @@ final class Restorer: @unchecked Sendable {
             usleep(500_000)
         }
         if !samePlace {
-            guard SpaceService.switchTo(display: saved.displayUuid, index: index) else {
-                report.problems.append("\(name): Space 전환 실패 (데스크톱 단축키 확인)")
-                return
-            }
-            // 같은 모니터 안에서 Space만 바꿀 때: 다른 모니터를 잠깐 거쳐야 현재 Space로 들어온다
-            if now?.display == saved.displayUuid, let other = displays.first(where: { $0.key != saved.displayUuid })?.value {
-                AX.setPosition(element, CGPoint(x: other.minX + 50, y: other.minY + 50))
-                usleep(300_000)
+            let other = displays.first(where: { $0.key != saved.displayUuid })?.value
+            if now?.display == saved.displayUuid && other == nil {
+                // 모니터가 1대뿐이라 거쳐 갈 곳이 없음: 제목 표시줄을 잡고 Space를 바꾼다 (마우스를 잠깐 씀)
+                guard SpaceService.moveByDrag(element: element, windowID: live.windowID, display: saved.displayUuid, to: index) else {
+                    report.problems.append("\(name): 가상화면 \(index)번으로 옮기지 못함 (모니터 1대, 끌어서 옮기기 실패)")
+                    return
+                }
+            } else {
+                guard SpaceService.switchTo(display: saved.displayUuid, index: index) else {
+                    report.problems.append("\(name): Space 전환 실패 (데스크톱 단축키 확인)")
+                    return
+                }
+                // 같은 모니터 안에서 Space만 바꿀 때: 다른 모니터를 잠깐 거쳐야 현재 Space로 들어온다
+                if now?.display == saved.displayUuid, let other {
+                    AX.setPosition(element, CGPoint(x: other.minX + 50, y: other.minY + 50))
+                    usleep(300_000)
+                }
             }
         }
         AX.setPosition(element, saved.frame.origin)
