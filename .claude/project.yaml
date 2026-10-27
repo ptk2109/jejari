@@ -2,7 +2,7 @@
 name: jejari
 type: app
 stage: building
-version: 0.4.0
+version: 0.5.0
 stack: [swift, swiftui, appkit]
 platform: macos-15+
 repo: https://github.com/ptk2109/jejari

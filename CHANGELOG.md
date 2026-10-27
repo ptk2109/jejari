@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-28
+
+### 추가
+
+- ② 전체 복원: 파일을 보여 주던 창(Xcode, 미리보기 등)은 그 파일을 다시 연다. 꺼진 앱은 그 파일로 실행한다
+- 저장할 때 시스템 설정 창은 체크를 꺼 둔 채로 시작 (잠깐 열어 두는 창이라)
+
+### 수정
+
+- 여러 모니터에서 저장한 Chrome 창의 탭 주소가 비던 문제
+- 탭 주소가 없는 Chrome 창 자리로 다른 사이트의 Chrome 창을 옮기던 문제. 이제 보고 있던 탭 주소로 알아보고, 없으면 그 주소로 창을 연다
+- 뒤에서 막 켠 앱(미리보기 등)의 창을 찾지 못해 "없음"으로 끝나던 문제
+
 ## [0.4.0] - 2026-10-28
 
 단축어나 스크립트로 제자리를 부르고 있었다면 업데이트 뒤 설정 → 일반에서 "외부 명령"을 허용해야 한다.
@@ -70,7 +83,8 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ptk2109/jejari/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ptk2109/jejari/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ptk2109/jejari/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ptk2109/jejari/compare/v0.1.0...v0.2.0

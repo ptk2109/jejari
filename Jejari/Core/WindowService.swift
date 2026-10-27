@@ -41,14 +41,13 @@ enum WindowService {
         }
         let layout = SpaceService.layout()
         var seen = Set<CGWindowID>()
-        for elementID in 0..<elementScanLimit {
-            guard let element = AX.remoteElement(pid: pid, elementID: elementID) else { continue }
+        func consider(_ element: AXUIElement) {
             AXUIElementSetMessagingTimeout(element, messagingTimeout)
             guard (AX.attribute(element, kAXRoleAttribute) as String?) == kAXWindowRole,
                   let windowID = AX.windowID(element), seen.insert(windowID).inserted,
-                  SpaceService.location(of: windowID, in: layout) != nil else { continue }
+                  SpaceService.location(of: windowID, in: layout) != nil else { return }
             let frame = AX.frame(element)
-            guard frame.width >= 100, frame.height >= 50 else { continue }
+            guard frame.width >= 100, frame.height >= 50 else { return }
             let subrole: String = AX.attribute(element, kAXSubroleAttribute) ?? ""
             let title: String = AX.attribute(element, kAXTitleAttribute) ?? ""
             let isDialog = subrole == kAXDialogSubrole || subrole == kAXSystemDialogSubrole
@@ -56,21 +55,30 @@ enum WindowService {
             // 입력 대기 창: 모달 / 작은 대화상자. 크기를 바꿀 수 없는 작은 표준 창은 보류 (maybeBlockers)
             if (AX.attribute(element, kAXModalAttribute) as Bool?) == true || (isDialog && small) {
                 result.blockers.append("\(title) (\(Int(frame.width))x\(Int(frame.height)))")
-                continue
+                return
             }
             if subrole == kAXStandardWindowSubrole && small && !AX.isSettable(element, kAXSizeAttribute) {
                 result.maybeBlockers.insert(windowID)
             }
             // 모달 창이 떠 있으면 큰 메인 창이 AXDialog로 보이기도 한다 (JetBrains)
-            guard subrole == kAXStandardWindowSubrole || isDialog else { continue }
+            guard subrole == kAXStandardWindowSubrole || isDialog else { return }
             result.windows.append(LiveWindow(
                 windowID: windowID, element: element, pid: pid, title: title,
                 identifier: AX.attribute(element, kAXIdentifierAttribute) ?? "",
                 document: AX.attribute(element, kAXDocumentAttribute) ?? "",
                 order: result.windows.count, frame: frame))
         }
+        // 다른 가상화면의 창까지 원격 요소 번호로 훑는다
+        for elementID in 0..<elementScanLimit {
+            if let element = AX.remoteElement(pid: pid, elementID: elementID) { consider(element) }
+        }
+        // 원격 요소로 창이 안 잡히는 앱이 있어(미리보기) 지금 가상화면의 창은 표준 창 목록으로도 본다
+        for element in (AX.attribute(app, kAXWindowsAttribute) as [AXUIElement]?) ?? [] { consider(element) }
         return result
     }
+
+    /// 저장할 때 체크를 꺼 둘 앱. 잠깐 열어 두는 창이라 다시 열면 다른 화면으로 열려 짝이 지어지지 않는다
+    static let uncheckedByDefault: Set<String> = ["com.apple.systempreferences"]
 
     /// 일반 앱(Dock에 아이콘이 있는 앱). 자기 자신은 뺀다
     static func regularApps() -> [NSRunningApplication] {
@@ -102,8 +110,9 @@ enum WindowService {
                     displayUuid: location.display, spaceIndex: location.index, spaceUuid: display.uuids[location.index - 1],
                     minimized: (AX.attribute(window.element, kAXMinimizedAttribute) as Bool?) ?? false,
                     fullScreen: (AX.attribute(window.element, "AXFullScreen") as Bool?) ?? false,
-                    urls: bundleId == BrowserService.chrome ? BrowserService.urls(for: window.frame, in: chromeTabs) : nil,
-                    stackOrder: stack[window.windowID]))
+                    urls: bundleId == BrowserService.chrome ? BrowserService.urls(for: window.frame, document: window.document, in: chromeTabs) : nil,
+                    stackOrder: stack[window.windowID],
+                    excluded: uncheckedByDefault.contains(bundleId) ? true : nil))
             }
         }
         return Snapshot(
