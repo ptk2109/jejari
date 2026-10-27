@@ -11,7 +11,9 @@ enum WindowMatcher {
     static func score(saved: SavedWindow, live: LiveWindow) -> Int? {
         var score = 0
         // 브라우저: 저장한 탭들의 사이트와 지금 보고 있는 탭(AXDocument)의 사이트를 비교
-        if let urls = saved.urls, !urls.isEmpty, let host = URL(string: live.document)?.host {
+        // URL이 없는 창(프로필 선택 창, 빈 창)은 저장된 브라우저 창과 짝짓지 않는다
+        if let urls = saved.urls, !urls.isEmpty {
+            guard let host = URL(string: live.document)?.host else { return nil }
             let hosts = Set(urls.compactMap { URL(string: $0)?.host })
             if !hosts.contains(host) { return nil }
             score += 100

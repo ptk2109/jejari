@@ -167,6 +167,7 @@ final class Restorer: @unchecked Sendable {
         var unresponsive = Set<String>()
         var countSince: [String: (count: Int, since: Date)] = [:]
         var reopened = Set<String>(), chromeOpened = Set<Int>()
+        var gaveUp = Set<String>()   // 더 기다려도 창이 생기지 않을 앱 (예: "실행만"인 PhpStorm 시작 화면)
         var lastProgress = Date()
         let start = Date()
 
@@ -200,6 +201,17 @@ final class Restorer: @unchecked Sendable {
                 }
                 let matched = Set(pairs.map(\.savedIndex))
                 let left = indexes.filter { !matched.contains($0) }
+
+                // 앱이 자리 잡았는데(창 수 15초 그대로, 띄운 지 20초 이상) 입력 대기도 아니고 할 수 있는 요청도 다 했으면 그 앱은 그만 기다린다
+                let settled = Date().timeIntervalSince(countSince[bundleId]!.since) > 15
+                    && Date().timeIntervalSince(launchedAt[bundleId] ?? .distantPast) > 20
+                let triedAll = (reopened.contains(bundleId) || !live.isEmpty || bundleId == BrowserService.chrome)
+                    && left.allSatisfy { chromeOpened.contains($0) || (windows[$0].urls ?? []).isEmpty }
+                if mode == .full, !left.isEmpty, settled, triedAll, blockers.isEmpty, responding {
+                    gaveUp.insert(bundleId)
+                    report.missing += left.map { "\(windows[$0].appName) \"\(windows[$0].title)\" (앱을 실행했지만 이 창이 열리지 않음)" }
+                    continue
+                }
                 still += left
 
                 // ② 창이 하나도 없는 앱(마지막 창을 닫은 앱 등)에 한 번 다시 열기 요청
