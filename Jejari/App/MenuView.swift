@@ -16,7 +16,7 @@ struct MenuView: View {
             ForEach(state.snapshotNames, id: \.self) { name in
                 Menu(name) {
                     Button("② 전체 복원 (앱 실행 포함)") { state.restore(name, mode: .full) }
-                    Button("① 배치만 (열린 창만 옮기기)") { state.restore(name, mode: .arrange) }
+                    Button("① 배치만 (열린 창만 옮기기, 불러올 때 설정 무시)") { state.restore(name, mode: .arrange) }
                 }
             }
         }

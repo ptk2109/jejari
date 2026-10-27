@@ -75,7 +75,7 @@ struct ManageView: View {
                     .tag(snapshot.name)
                     .contextMenu {
                         Button("② 전체 복원으로 불러오기") { state.restore(snapshot.name, mode: .full) }
-                        Button("① 배치만 불러오기") { state.restore(snapshot.name, mode: .arrange) }
+                        Button("① 배치만 불러오기 (설정 무시)") { state.restore(snapshot.name, mode: .arrange) }
                         Button("창 고르기…") { state.startEdit(snapshot.name) }
                         Button("복제") { selection = state.duplicate(snapshot.name) ?? snapshot.name }
                         Divider()
@@ -112,7 +112,7 @@ struct ManageView: View {
                 HStack(spacing: 10) {
                     Menu {
                         Button("② 전체 복원 (앱 실행 포함)") { state.restore(selection, mode: .full) }
-                        Button("① 배치만 (열린 창만 옮기기)") { state.restore(selection, mode: .arrange) }
+                        Button("① 배치만 (열린 창만 옮기기, 불러올 때 설정 무시)") { state.restore(selection, mode: .arrange) }
                     } label: {
                         Text("▶ 불러오기")
                     } primaryAction: {
