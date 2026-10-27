@@ -195,7 +195,7 @@ enum SpaceService {
     }
 
     /// Mission Control을 열고 해당 모니터 영역에서 작업한 뒤, 어떤 경우에도 닫는다
-    private static func withMissionControl(screen: CGRect, _ body: (AXUIElement) -> Void) -> Bool {
+    private static func withMissionControl(screen: CGRect, log: ((String) -> Void)? = nil, _ body: (AXUIElement) -> Void) -> Bool {
         guard let windowManager else { return false }
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
         defer { if missionControlOpen() { pressEscape(); usleep(800_000) } }
@@ -205,7 +205,17 @@ enum SpaceService {
             usleep(200_000)
             region = AX.find(windowManager, identifier: "mc.display").first { AX.frame($0) == screen }
         }
+        log?("mc.display \(AX.find(windowManager, identifier: "mc.display").map { "\(AX.frame($0))" }), 대상 \(screen) → \(region == nil ? "못 찾음" : "찾음")")
         guard let region else { return false }
+        // 위쪽 Spaces 막대를 펼친다 (접혀 있으면 썸네일에 삭제 동작이 없다. 0단계에서 펼친 상태로 성공)
+        let savedMouse = CGEvent(source: nil)?.location ?? .zero
+        CGEvent(mouseEventSource: CGEventSource(stateID: .hidSystemState), mouseType: .mouseMoved,
+                mouseCursorPosition: CGPoint(x: screen.midX, y: screen.minY + 3), mouseButton: .left)?.post(tap: .cghidEventTap)
+        usleep(800_000)
+        defer {
+            CGEvent(mouseEventSource: CGEventSource(stateID: .hidSystemState), mouseType: .mouseMoved,
+                    mouseCursorPosition: savedMouse, mouseButton: .left)?.post(tap: .cghidEventTap)
+        }
         body(region)
         return true
     }
@@ -226,12 +236,17 @@ enum SpaceService {
     }
 
     /// 모니터 안 번호(1부터)의 Space들을 삭제한다. 뒤 번호부터 지운다
-    static func removeSpaces(display: String, screen: CGRect, indexes: [Int]) -> Int {
+    static func removeSpaces(display: String, screen: CGRect, indexes: [Int], log: ((String) -> Void)? = nil) -> Int {
         var removed = 0
-        _ = withMissionControl(screen: screen) { region in
+        _ = withMissionControl(screen: screen, log: log) { region in
             for index in indexes.sorted(by: >) {
-                guard let list = AX.find(region, identifier: "mc.spaces.list").first else { break }
+                guard let list = AX.find(region, identifier: "mc.spaces.list").first else { log?("mc.spaces.list 없음"); break }
                 let thumbnails: [AXUIElement] = AX.attribute(list, kAXChildrenAttribute) ?? []
+                if let t = thumbnails.indices.contains(index - 1) ? thumbnails[index - 1] : nil {
+                    var actions: CFArray?
+                    AXUIElementCopyActionNames(t, &actions)
+                    log?("썸네일 \(thumbnails.count)개, #\(index) \(AX.attribute(t, kAXTitleAttribute) as String? ?? "") 동작 \(actions as? [String] ?? [])")
+                }
                 guard index >= 1, index <= thumbnails.count else { continue }
                 if AXUIElementPerformAction(thumbnails[index - 1], "AXRemoveDesktop" as CFString) == .success { removed += 1 }
                 usleep(600_000)

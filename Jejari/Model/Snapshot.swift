@@ -5,12 +5,14 @@ import Foundation
 /// 불러올 때 스냅샷에 없는 앱을 어떻게 할지 (기획서 12.1, 12.2 #4). 배치마다 정한다
 enum OtherAppsPolicy: String, Codable, CaseIterable {
     case keep       // 그대로 둠
+    case collect    // 보관 화면으로 모으기 (모니터마다 필요한 화면 뒤의 가상화면 하나)
     case hide       // 숨기기 (⌘H)
     case quit       // 종료 요청 (⌘Q, 확인 후)
 
     var title: String {
         switch self {
         case .keep: "그대로 둠"
+        case .collect: "보관 화면으로"
         case .hide: "숨기기"
         case .quit: "종료 요청"
         }
@@ -23,6 +25,8 @@ struct Snapshot: Codable, Identifiable {
     var createdAt: Date
     /// 다른 앱 처리. nil이면 그대로 둠 (예전 파일과 호환)
     var otherApps: OtherAppsPolicy? = nil
+    /// 남는 가상화면 정리: 필요한 화면 뒤의 남는 화면의 창을 보관 화면 하나로 모으고 빈 화면을 지운다. nil이면 끔
+    var tidySpaces: Bool? = nil
     var displays: [SavedDisplay]
     var spaces: [SavedDisplaySpaces]
     var apps: [SavedApp]

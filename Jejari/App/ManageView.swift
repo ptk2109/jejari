@@ -25,7 +25,8 @@ struct ManageView: View {
                 }
             }
             if let selection, let snapshot = state.snapshots.first(where: { $0.name == selection }) {
-                OtherAppsPicker(policy: Binding(get: { snapshot.otherAppsPolicy }, set: { state.setOtherApps(selection, $0) }))
+                OtherAppsPicker(policy: Binding(get: { snapshot.otherAppsPolicy }, set: { state.setOtherApps(selection, $0) }),
+                                tidySpaces: Binding(get: { snapshot.tidySpaces ?? false }, set: { state.setTidySpaces(selection, $0) }))
             }
             HStack {
                 Button("불러오기") { if let selection { state.restore(selection) } }
@@ -46,7 +47,7 @@ struct ManageView: View {
             }
         }
         .padding(16)
-        .frame(width: 560, height: 460)
+        .frame(width: 600, height: 500)
         .onAppear { state.reload() }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("새 이름", text: $newName)
@@ -85,7 +86,7 @@ struct ManageView: View {
         let date = snapshot.createdAt.formatted(date: .abbreviated, time: .shortened)
         let spaces = snapshot.spaces.reduce(0) { $0 + $1.spaces.count }
         let windows = snapshot.includedWindows.count == snapshot.windows.count ? "\(snapshot.windows.count)" : "\(snapshot.includedWindows.count)/\(snapshot.windows.count)"
-        let others = snapshot.otherAppsPolicy == .keep ? "" : " · 다른 앱 \(snapshot.otherAppsPolicy.title)"
+        let others = (snapshot.otherAppsPolicy == .keep ? "" : " · 다른 앱 \(snapshot.otherAppsPolicy.title)") + (snapshot.tidySpaces == true ? " · 가상화면 정리" : "")
         return "\(date) · 창 \(windows)개 · 모니터 \(snapshot.displays.count)대 · 가상화면 \(spaces)개\(others)"
     }
 }

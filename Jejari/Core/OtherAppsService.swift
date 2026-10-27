@@ -38,8 +38,8 @@ enum OtherAppsService {
     /// 정책대로 처리하고 처리한 앱 이름을 돌려준다
     static func apply(_ policy: OtherAppsPolicy, for snapshot: Snapshot) -> [String] {
         switch policy {
-        case .keep:
-            return []
+        case .keep, .collect:
+            return []  // 보관 화면으로 모으기는 Restorer가 창을 옮기며 처리
         case .hide:
             return others(for: snapshot).compactMap { app in
                 let element = AXUIElementCreateApplication(app.processIdentifier)

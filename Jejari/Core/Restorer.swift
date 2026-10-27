@@ -7,6 +7,7 @@ struct RestoreReport: Codable {
     var missing: [String] = []      // 저장된 창과 짝이 없음 (앱이 꺼져 있거나 창이 없음)
     var problems: [String] = []     // 옮겼지만 문제가 있거나 옮길 수 없음
     var otherApps: [String] = []    // 다른 앱 처리 결과 (숨김, 종료 요청)
+    var spaces: [String] = []       // 가상화면 정리 결과
 
     var summary: String {
         var parts = ["✅ \(moved.count + alreadyInPlace)개 제자리"]
@@ -39,6 +40,8 @@ final class Restorer: @unchecked Sendable {
     /// 모니터가 1대일 때 Space 이동의 경유지로 잠깐 만드는 가상 모니터 (필요할 때 한 번 만들고 끝나면 없앤다)
     private var bridge: VirtualDisplay?
     private var bridgeFailed = false
+    /// 배치한 창이 들어간 (모니터, Space 번호). 가상화면 정리 때 "필요한 화면"으로 본다
+    private var usedSpaces: [String: Set<Int>] = [:]
     private var report = RestoreReport()
 
     /// dryRun: 옮기지 않고 저장된 자리와 다른 창만 moved에 담는다 (검증용)
@@ -77,6 +80,7 @@ final class Restorer: @unchecked Sendable {
             if bridge == nil { bridgeFailed = true } else { progress("모니터가 1대라 임시 모니터를 만듦") }
         }
         placeWindows(windows)
+        if !dryRun && mode == .full { tidySpaces(extra: extraSpaces) }
         if let bridge {
             bridge.remove()
             self.bridge = nil
@@ -152,7 +156,8 @@ final class Restorer: @unchecked Sendable {
     /// 모니터의 Space가 스냅샷(+대체분)보다 적으면 Mission Control로 추가 (기획서 12.4 #18)
     private func addMissingSpaces(_ extra: [String: Int]) {
         let layout = SpaceService.layout()
-        for (display, frame) in displays {
+        for display in displays.keys {
+            guard let frame = DisplayService.current().first(where: { $0.uuid == display })?.frame else { continue }
             let have = layout.first { $0.displayUuid == display }?.ids.count ?? 0
             // 대체로 붙이는 Space는 지금 있는 Space 뒤에 붙인다 (substituteMissingDisplays의 base와 같은 기준)
             let need = extra[display] == nil ? savedSpaceCount(display) : max(savedSpaceCount(display), have) + extra[display]!
@@ -342,6 +347,7 @@ final class Restorer: @unchecked Sendable {
         if index != saved.spaceIndex && useUuid[saved.displayUuid] != true && !followedUuids.contains(saved.spaceUuid) {
             report.problems.append("\(name): Space \(saved.spaceIndex)번이 없어 \(index)번에 둠")
         }
+        usedSpaces[saved.displayUuid, default: []].insert(index)
         let now = SpaceService.location(of: live.windowID)
         let current = AX.frame(element)
         let samePlace = now?.display == saved.displayUuid && now?.index == index
@@ -405,6 +411,91 @@ final class Restorer: @unchecked Sendable {
         }
         report.moved.append(name)
         progress("\(name) 이동")
+    }
+
+    // MARK: 가상화면 정리
+
+    /// 거쳐 갈 모니터(다른 실제 모니터, 없으면 임시 가상 모니터)
+    private func bounceFrame(excluding display: String) -> CGRect? {
+        if let other = displays.first(where: { $0.key != display })?.value { return other }
+        if bridge == nil && !bridgeFailed {
+            bridge = VirtualDisplay()
+            if bridge == nil { bridgeFailed = true } else { progress("모니터가 1대라 임시 모니터를 만듦") }
+        }
+        return bridge?.frame
+    }
+
+    /// 창을 같은 모니터의 다른 Space로 옮긴다 (위치·크기는 그대로)
+    private func move(_ window: LiveWindow, display: String, to index: Int) -> Bool {
+        let frame = AX.frame(window.element)
+        guard let other = bounceFrame(excluding: display), SpaceService.switchTo(display: display, index: index) else { return false }
+        AX.setPosition(window.element, CGPoint(x: other.minX + 50, y: other.minY + 50))
+        usleep(300_000)
+        AX.setPosition(window.element, frame.origin)
+        AX.setSize(window.element, frame.size)
+        usleep(200_000)
+        return SpaceService.location(of: window.windowID).map { $0.display == display && $0.index == index } == true
+    }
+
+    /// 모니터마다 [필요한 화면들][보관 화면 1개] 로 정리한다 (사용자 요구, 2026-10-27).
+    /// 필요한 화면 = 스냅샷 화면 수만큼의 앞쪽 + 배치한 창이 들어간 화면. 남는 화면의 창은 보관 화면(남는 화면 중 가장 앞)으로 모으고,
+    /// "보관 화면으로 모으기"면 필요한 화면에 있는 다른 앱 창도 보낸다. "남는 가상화면 정리"가 켜져 있으면 빈 남는 화면을 지운다.
+    /// 화면 순서는 바꿀 수 없으므로 창을 옮겨서 맞춘다. 전체 화면 Space는 건드리지 않는다
+    private func tidySpaces(extra: [String: Int]) {
+        let collect = snapshot.otherAppsPolicy == .collect
+        let removeEmpty = snapshot.tidySpaces == true
+        guard collect || removeEmpty else { return }
+        let others = Set(OtherAppsService.others(for: snapshot).compactMap(\.bundleIdentifier))
+        let keep = OtherAppsService.alwaysKeep
+        var all: [(window: LiveWindow, bundleId: String, name: String)] = []
+        for app in WindowService.regularApps() {
+            for window in WindowService.scan(pid: app.processIdentifier).windows {
+                all.append((window, app.bundleIdentifier ?? "", app.localizedName ?? "?"))
+            }
+        }
+        for display in displays.keys {
+            // 임시 모니터가 있으면 macOS가 내장 화면 해상도를 바꾸기도 해서(1800x1169 → 1512x982) 지금 크기를 다시 읽는다
+            guard let screen = DisplayService.current().first(where: { $0.uuid == display })?.frame,
+                  let layout = SpaceService.layout().first(where: { $0.displayUuid == display }) else { continue }
+            let base = max(savedSpaceCount(display) + (extra[display] ?? 0), 1)
+            let needed = Set(1...min(base, layout.ids.count)).union(usedSpaces[display] ?? [])
+            var spare = layout.ids.indices.map { $0 + 1 }.filter { !needed.contains($0) && layout.types[$0 - 1] != 4 }
+            let located = all.compactMap { item -> (window: LiveWindow, bundleId: String, name: String, index: Int)? in
+                guard let at = SpaceService.location(of: item.window.windowID), at.display == display else { return nil }
+                return (item.window, item.bundleId, item.name, at.index)
+            }
+            let toCollect = located.filter { item in
+                spare.contains(item.index) || (collect && needed.contains(item.index) && others.contains(item.bundleId) && !keep.contains(item.bundleId))
+            }
+            var storage = spare.min()
+            if !toCollect.isEmpty && storage == nil {
+                // 남는 화면이 없으면 보관 화면을 하나 만든다
+                if SpaceService.addSpaces(display: display, screen: screen, count: 1) == 1 {
+                    storage = SpaceService.layout().first { $0.displayUuid == display }?.ids.count
+                    report.spaces.append("보관 화면을 새로 만듦 (#\(storage ?? 0))")
+                }
+            }
+            if let storage {
+                var moved = 0
+                for item in toCollect where item.index != storage {
+                    if move(item.window, display: display, to: storage) { moved += 1 } else { report.problems.append("\(item.name) \"\(item.window.title.prefix(30))\": 보관 화면으로 옮기지 못함") }
+                }
+                if moved > 0 {
+                    report.spaces.append("창 \(moved)개를 보관 화면(#\(storage))으로 모음")
+                    progress("창 \(moved)개를 보관 화면 #\(storage)으로 모음")
+                }
+                if !toCollect.isEmpty { spare.removeAll { $0 == storage } }
+            }
+            guard removeEmpty else { continue }
+            // 남는 화면 중 이제 비어 있는 것을 지운다 (보관 화면은 창이 있으면 남김)
+            let occupied = Set(all.compactMap { SpaceService.location(of: $0.window.windowID) }.filter { $0.display == display }.map(\.index))
+            let removable = spare.filter { !occupied.contains($0) }
+            if !removable.isEmpty {
+                let removed = SpaceService.removeSpaces(display: display, screen: screen, indexes: removable)
+                report.spaces.append("빈 가상화면 \(removed)개 삭제 (\(removable.map { "#\($0)" }.joined(separator: ", ")))")
+                progress("빈 가상화면 \(removed)개 삭제")
+            }
+        }
     }
 
     /// 임시 모니터를 없애면 macOS가 다시 창 크기를 줄이는 등 흔든다. 같은 Space에 있는 창의 위치·크기만 다시 맞추고

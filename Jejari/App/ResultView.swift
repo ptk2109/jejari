@@ -14,6 +14,7 @@ struct ResultView: View {
                     section("❌ 찾지 못한 창", report.missing)
                     section("↪︎ 옮긴 창", report.moved)
                     section("다른 앱", report.otherApps)
+                    section("가상화면 정리", report.spaces)
                 }
                 if report.problems.isEmpty && report.missing.isEmpty {
                     Text("모든 창이 제자리입니다.").foregroundStyle(.secondary)
