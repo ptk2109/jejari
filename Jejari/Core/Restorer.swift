@@ -16,20 +16,28 @@ struct RestoreReport {
     }
 }
 
-/// 스냅샷대로 이미 열린 창을 모니터·Space·위치·크기로 옮긴다 (기획서 12.1 ① 배치만 + 2단계 Spaces)
+/// 불러오기 모드 (기획서 12.1)
+enum RestoreMode: String {
+    case full       // ② 전체 복원: 꺼진 앱 실행, 창 없는 앱에 다시 열기 요청, 브라우저 URL 열기, 뜬 창부터 배치
+    case arrange    // ① 배치만: 이미 열린 창만 옮긴다
+}
+
+/// 스냅샷대로 창을 모니터·Space·위치·크기로 옮긴다 (기획서 12.1, 2단계 Spaces, 3단계 중 "실행만")
 /// Space 이동: ⌃N으로 대상 모니터를 목표 Space로 전환한 뒤 AX로 창을 그 모니터로 옮긴다.
 /// 같은 모니터 안에서 Space만 바꿀 때는 다른 모니터를 잠깐 거친다 (0단계 "모니터 경유" 방식)
 final class Restorer: @unchecked Sendable {
     private let snapshot: Snapshot
     private let dryRun: Bool
+    private let mode: RestoreMode
     private let progress: (String) -> Void
     private var displays: [String: CGRect] = [:]
     private var useUuid: [String: Bool] = [:]
     private var report = RestoreReport()
 
     /// dryRun: 옮기지 않고 저장된 자리와 다른 창만 moved에 담는다 (검증용)
-    init(snapshot: Snapshot, dryRun: Bool = false, progress: @escaping (String) -> Void) {
+    init(snapshot: Snapshot, mode: RestoreMode = .full, dryRun: Bool = false, progress: @escaping (String) -> Void) {
         self.snapshot = snapshot
+        self.mode = dryRun ? .arrange : mode
         self.dryRun = dryRun
         self.progress = progress
     }
@@ -45,6 +53,7 @@ final class Restorer: @unchecked Sendable {
         }
         if !dryRun { addMissingSpaces(extraSpaces) }
         chooseSpaceLookup(extraSpaces)
+        if mode == .full { launchApps() }
         placeWindows(windows)
         if !dryRun { returnToSavedSpaces() }
         return report
@@ -117,31 +126,119 @@ final class Restorer: @unchecked Sendable {
         return min(window.spaceIndex, max(uuids.count, 1))
     }
 
-    // MARK: 창 배치
+    // MARK: 앱 실행 (② 전체 복원)
 
-    private func placeWindows(_ windows: [SavedWindow]) {
-        let groups = Dictionary(grouping: windows.indices, by: { windows[$0].bundleId })
-        for (bundleId, indexes) in groups {
-            let name = windows[indexes[0]].appName
-            let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-            guard !apps.isEmpty else {
-                report.missing += indexes.map { "\(name) \"\(windows[$0].title)\" (앱이 꺼져 있음)" }
+    /// 앱을 띄운 시각. 이때부터 몇 초 동안은 창이 덜 떠서 약한 단서 매칭을 미룬다
+    private var launchedAt: [String: Date] = [:]
+
+    /// 포함된 앱 중 꺼진 것을 뒤에서 실행한다 (앞으로 가져오지 않음)
+    private func launchApps() {
+        let needed = Set(snapshot.includedWindows.map(\.bundleId))
+        for app in snapshot.apps where app.isIncluded && (needed.contains(app.bundleId) || snapshot.windowlessAppIndexes.contains { snapshot.apps[$0].bundleId == app.bundleId }) {
+            guard NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleId).isEmpty,
+                  !app.bundleId.isEmpty, FileManager.default.fileExists(atPath: app.path) else {
+                if !app.path.isEmpty && !FileManager.default.fileExists(atPath: app.path) { report.missing.append("\(app.name) (설치되어 있지 않음)") }
                 continue
             }
-            var live: [LiveWindow] = []
-            for app in apps {
-                let scan = WindowService.scan(pid: app.processIdentifier)
-                if !scan.responding { report.problems.append("\(name): 응답 없음") }
-                if !scan.blockers.isEmpty { report.problems.append("\(name): 입력을 기다리는 창 \(scan.blockers.joined(separator: ", "))") }
-                live += scan.windows
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = false
+            NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: configuration)
+            launchedAt[app.bundleId] = Date()
+            progress("\(app.name) 실행")
+        }
+    }
+
+    /// Dock 아이콘을 누른 것과 같은 "다시 열기" 요청. 대부분의 앱이 창이 없으면 새 창을 만든다
+    private func reopen(_ path: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-g", "-a", path]  // -g: 앞으로 가져오지 않음
+        try? process.run()
+        process.waitUntilExit()
+    }
+
+    // MARK: 창 배치
+
+    /// 앱마다 따로 보면서 뜬 창부터 배치한다. 한 앱이 늦거나 입력을 기다려도 다른 앱을 막지 않는다 (기획서 12.2 #5, #20)
+    private func placeWindows(_ windows: [SavedWindow]) {
+        var pending = Array(windows.indices)
+        var used = Set<CGWindowID>()
+        var blocked: [String: [String]] = [:]
+        var unresponsive = Set<String>()
+        var countSince: [String: (count: Int, since: Date)] = [:]
+        var reopened = Set<String>(), chromeOpened = Set<Int>()
+        var lastProgress = Date()
+        let start = Date()
+
+        while !pending.isEmpty {
+            var still: [Int] = []
+            for (bundleId, indexes) in Dictionary(grouping: pending, by: { windows[$0].bundleId }) {
+                let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+                guard !apps.isEmpty else { still += indexes; continue }
+                var live: [LiveWindow] = [], blockers: [String] = [], responding = true
+                for app in apps {
+                    let scan = WindowService.scan(pid: app.processIdentifier)
+                    live += scan.windows
+                    blockers += scan.blockers
+                    responding = responding && scan.responding
+                }
+                if responding { unresponsive.remove(bundleId) } else { unresponsive.insert(bundleId) }
+                if blockers.isEmpty { blocked[bundleId] = nil } else {
+                    if blocked[bundleId] == nil { progress("\(windows[indexes[0]].appName): 입력 대기 → 뒤로 미룸") }
+                    blocked[bundleId] = blockers
+                }
+                live = live.filter { !used.contains($0.windowID) }
+                // 약한 단서(제목 다름 등)는 앱이 안정된 뒤에: 원래 떠 있던 앱이거나, 띄운 지 5초가 지나고 창 수가 4초 동안 그대로일 때
+                if countSince[bundleId]?.count != live.count { countSince[bundleId] = (live.count, Date()) }
+                let stable = mode == .arrange || launchedAt[bundleId] == nil
+                    || (Date().timeIntervalSince(launchedAt[bundleId]!) > 5 && Date().timeIntervalSince(countSince[bundleId]!.since) > 4)
+                let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, allowWeak: stable)
+                for pair in pairs {
+                    used.insert(pair.live.windowID)
+                    place(windows[pair.savedIndex], pair.live)
+                    lastProgress = Date()
+                }
+                let matched = Set(pairs.map(\.savedIndex))
+                let left = indexes.filter { !matched.contains($0) }
+                still += left
+
+                // ② 창이 하나도 없는 앱(마지막 창을 닫은 앱 등)에 한 번 다시 열기 요청
+                if mode == .full, !left.isEmpty, live.isEmpty, blockers.isEmpty, stable, !reopened.contains(bundleId),
+                   bundleId != BrowserService.chrome, let path = apps.first?.bundleURL?.path {
+                    reopened.insert(bundleId)
+                    progress("\(windows[indexes[0]].appName): 창이 없어 다시 열기 요청")
+                    reopen(path)
+                }
+                // ② Chrome: 세션 복원을 5초 기다린 뒤에도 같은 사이트 창이 없으면 저장한 URL로 한 번 연다
+                if mode == .full, bundleId == BrowserService.chrome, Date().timeIntervalSince(launchedAt[bundleId] ?? .distantPast) > 5 {
+                    for i in left where !chromeOpened.contains(i) {
+                        guard let urls = windows[i].urls, !urls.isEmpty else { continue }
+                        chromeOpened.insert(i)
+                        progress("Chrome 창 열기: \(urls[0]) 외 \(urls.count - 1)개")
+                        BrowserService.openChromeWindow(urls)
+                    }
+                }
             }
-            // ① 배치만 모드는 앱이 이미 떠 있으므로 약한 단서도 바로 배정한다
-            let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, allowWeak: true)
-            let matched = Set(pairs.map(\.savedIndex))
-            // 이유를 구분해서 보고: 앱은 켜져 있지만 창이 없음 / 창은 있는데 저장한 창과 맞는 것이 없음
-            let reason = live.isEmpty ? "앱은 켜져 있지만 열린 창이 없음" : "맞는 창을 찾지 못함"
-            report.missing += indexes.filter { !matched.contains($0) }.map { "\(name) \"\(windows[$0].title)\" (\(reason))" }
-            for pair in pairs { place(windows[pair.savedIndex], pair.live) }
+            pending = still
+            if pending.isEmpty || mode == .arrange { break }
+            // 남은 것이 모두 입력 대기·응답 없음 앱이고 15초 진전이 없으면 끝. 아니면 최대 120초
+            let elapsed = Date().timeIntervalSince(start)
+            let onlyStuck = pending.allSatisfy { blocked[windows[$0].bundleId] != nil || unresponsive.contains(windows[$0].bundleId) }
+            if elapsed > 120 || (elapsed > 20 && onlyStuck && Date().timeIntervalSince(lastProgress) > 15) { break }
+            sleep(2)
+        }
+
+        // 결과 보고: 이유를 구분한다
+        for (bundleId, blockers) in blocked {
+            report.problems.append("\(windows.first { $0.bundleId == bundleId }?.appName ?? bundleId): 입력을 기다리는 창 \(blockers.joined(separator: ", "))")
+            if !dryRun { NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.activate() }
+        }
+        for bundleId in unresponsive { report.problems.append("\(windows.first { $0.bundleId == bundleId }?.appName ?? bundleId): 응답 없음") }
+        for i in pending {
+            let w = windows[i]
+            let running = !NSRunningApplication.runningApplications(withBundleIdentifier: w.bundleId).isEmpty
+            let reason = !running ? "앱이 꺼져 있음" : (blocked[w.bundleId] != nil ? "입력 대기 중" : "맞는 창을 찾지 못함 (창이 없거나 다른 창)")
+            report.missing.append("\(w.appName) \"\(w.title)\" (\(reason))")
         }
     }
 

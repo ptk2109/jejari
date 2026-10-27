@@ -10,7 +10,12 @@ enum WindowMatcher {
     /// nil = 확실히 다른 창 (다른 파일, 다른 사이트, 다른 JetBrains 프로젝트)
     static func score(saved: SavedWindow, live: LiveWindow) -> Int? {
         var score = 0
-        if !saved.document.isEmpty && !live.document.isEmpty {
+        // 브라우저: 저장한 탭들의 사이트와 지금 보고 있는 탭(AXDocument)의 사이트를 비교
+        if let urls = saved.urls, !urls.isEmpty, let host = URL(string: live.document)?.host {
+            let hosts = Set(urls.compactMap { URL(string: $0)?.host })
+            if !hosts.contains(host) { return nil }
+            score += 100
+        } else if !saved.document.isEmpty && !live.document.isEmpty {
             if saved.document == live.document {
                 score += 100
             } else if saved.document.hasPrefix("file:") || live.document.hasPrefix("file:") {
@@ -19,7 +24,8 @@ enum WindowMatcher {
                 score += 50  // 웹 주소는 페이지가 바뀌므로 사이트만 비교
             }
         }
-        if isProjectTitle(saved) && isProjectTitle(saved.bundleId, live.title) && titleKey(saved.title) != titleKey(live.title) { return nil }
+        // 프로젝트 창은 프로젝트 창끼리만, 같은 프로젝트끼리만 (시작 화면이 프로젝트 자리로 가지 않게)
+        if isProjectTitle(saved) && (!isProjectTitle(saved.bundleId, live.title) || titleKey(saved.title) != titleKey(live.title)) { return nil }
         if !saved.identifier.isEmpty && saved.identifier == live.identifier { score += 50 }
         if !saved.title.isEmpty && saved.title == live.title {
             score += 60

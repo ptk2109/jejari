@@ -63,15 +63,17 @@ final class AppState: ObservableObject {
 
     // MARK: 외부 명령
 
-    /// jejari://save?name=…, restore?name=…, verify?name=…, undo, status, grant, open?window=… (개발 빌드: scramble)
+    /// jejari://save?name=…, restore?name=…[&mode=full|arrange], verify?name=…, undo, status, grant, open?window=… (개발 빌드: scramble)
     /// 외부 명령은 확인 창이나 알림 없이 바로 실행하고 결과를 파일로 남긴다
     func handle(_ url: URL) {
-        let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "name" }?.value ?? "기본"
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let name = query.first { $0.name == "name" }?.value ?? "기본"
+        let mode = query.first { $0.name == "mode" }?.value.flatMap(RestoreMode.init) ?? .full
         switch url.host {
         case "save": save(name, quiet: true)
-        case "restore": restore(name, quiet: true)
+        case "restore": restore(name, mode: mode, quiet: true)
         case "verify": restore(name, quiet: true, verifyOnly: true)
-        case "undo": restore(SnapshotStore.previousStateName, isUndo: true, quiet: true)
+        case "undo": restore(SnapshotStore.previousStateName, mode: .arrange, isUndo: true, quiet: true)
         case "grant":
             // 권한 요청 창을 띄워 손쉬운 사용 목록에 제자리를 올리고 설정 화면을 연다
             if let item = SettingsCheck.items().first(where: { $0.id == "accessibility" }) { SettingsCheck.perform(item) }
@@ -219,7 +221,7 @@ final class AppState: ObservableObject {
     // MARK: 불러오기
 
     /// 불러오기 직전 상태를 자동 저장하고 복원한다 (기획서 12.5). 되돌리기와 검증은 직전 상태를 저장하지 않는다
-    func restore(_ name: String, isUndo: Bool = false, quiet: Bool = false, verifyOnly: Bool = false) {
+    func restore(_ name: String, mode: RestoreMode = .full, isUndo: Bool = false, quiet: Bool = false, verifyOnly: Bool = false) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         let snapshot: Snapshot
         do { snapshot = try SnapshotStore.load(name) } catch {
@@ -232,7 +234,7 @@ final class AppState: ObservableObject {
         Task.detached {
             if !isUndo && !verifyOnly { try? SnapshotStore.save(WindowService.capture(name: SnapshotStore.previousStateName)) }
             let log = LogBox()
-            let report = Restorer(snapshot: snapshot, dryRun: verifyOnly) { message in
+            let report = Restorer(snapshot: snapshot, mode: mode, dryRun: verifyOnly) { message in
                 log.append(message)
                 Task { @MainActor in self.status = message }
             }.run()
@@ -255,7 +257,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    func undo() { restore(SnapshotStore.previousStateName, isUndo: true) }
+    /// 되돌리기는 ① 배치만으로 (기획서 12.5)
+    func undo() { restore(SnapshotStore.previousStateName, mode: .arrange, isUndo: true) }
 
     // MARK: 결과 보고 (기획서 12.5)
 

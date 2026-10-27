@@ -80,6 +80,7 @@ enum WindowService {
         let layout = SpaceService.layout()
         var apps: [SavedApp] = []
         var windows: [SavedWindow] = []
+        let chromeTabs = BrowserService.chromeWindows()
         for app in regularApps() {
             let bundleId = app.bundleIdentifier ?? ""
             apps.append(SavedApp(bundleId: bundleId, name: app.localizedName ?? bundleId, path: app.bundleURL?.path ?? ""))
@@ -91,7 +92,8 @@ enum WindowService {
                     identifier: window.identifier, document: window.document, order: window.order, frame: window.frame,
                     displayUuid: location.display, spaceIndex: location.index, spaceUuid: display.uuids[location.index - 1],
                     minimized: (AX.attribute(window.element, kAXMinimizedAttribute) as Bool?) ?? false,
-                    fullScreen: (AX.attribute(window.element, "AXFullScreen") as Bool?) ?? false))
+                    fullScreen: (AX.attribute(window.element, "AXFullScreen") as Bool?) ?? false,
+                    urls: bundleId == BrowserService.chrome ? BrowserService.urls(for: window.frame, in: chromeTabs) : nil))
             }
         }
         return Snapshot(

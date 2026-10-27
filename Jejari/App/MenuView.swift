@@ -12,8 +12,12 @@ struct MenuView: View {
             if state.snapshots.isEmpty {
                 Text("저장된 배치 없음")
             }
+            // 기획서 12.1: 스냅샷 ▸ ② 전체 복원(기본) / ① 배치만
             ForEach(state.snapshotNames, id: \.self) { name in
-                Button(name) { state.restore(name) }
+                Menu(name) {
+                    Button("② 전체 복원 (앱 실행 포함)") { state.restore(name, mode: .full) }
+                    Button("① 배치만 (열린 창만 옮기기)") { state.restore(name, mode: .arrange) }
+                }
             }
         }
         .disabled(state.busy)

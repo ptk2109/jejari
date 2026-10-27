@@ -26,6 +26,7 @@ targets:
         CFBundleVersion: "1"
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.utilities
+        NSAppleEventsUsageDescription: 저장할 때 브라우저 창의 탭 주소를 읽어 불러올 때 다시 엽니다.
         # jejari://save?name=… 등 외부(스크립트, 단축어)에서 저장/불러오기를 부를 수 있게 한다
         CFBundleURLTypes:
           - CFBundleURLName: com.nam24.jejari
