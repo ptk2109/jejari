@@ -1,6 +1,18 @@
 import CoreGraphics
 import Foundation
 
+/// 매칭에 쓰는 단서. 지금 창(LiveWindow)과 방금 찍은 창(SavedWindow)이 같이 쓴다
+protocol WindowClues {
+    var title: String { get }
+    var identifier: String { get }
+    var document: String { get }
+    var order: Int { get }
+    var frame: CGRect { get }
+}
+
+extension LiveWindow: WindowClues {}
+extension SavedWindow: WindowClues {}
+
 /// 저장된 창 ↔ 지금 창 매칭 (기획서 4장 창 매칭 전략)
 /// macOS에는 재시작 뒤에도 유지되는 창 번호가 없고 제목도 자주 바뀌므로 여러 단서를 점수로 합친다.
 enum WindowMatcher {
@@ -8,7 +20,7 @@ enum WindowMatcher {
     static let strongScore = 40
 
     /// nil = 확실히 다른 창 (다른 파일, 다른 사이트, 다른 JetBrains 프로젝트)
-    static func score(saved: SavedWindow, live: LiveWindow) -> Int? {
+    static func score(saved: SavedWindow, live: some WindowClues) -> Int? {
         var score = 0
         // 브라우저: 저장한 탭들의 사이트와 지금 보고 있는 탭(AXDocument)의 사이트를 비교
         // URL이 없는 창(프로필 선택 창, 빈 창)은 저장된 브라우저 창과 짝짓지 않는다
@@ -70,6 +82,40 @@ enum WindowMatcher {
             usedSaved.insert(candidate.savedIndex)
             usedLive.insert(candidate.live.windowID)
             result.append(candidate)
+        }
+        return result
+    }
+}
+
+extension Snapshot {
+    /// 같은 이름으로 다시 저장할 때 기존 배치에서 이어받는다: 불러올 때 설정, 뺀 앱, 뺀 창.
+    /// 뺀 창은 강한 단서로 짝지어진 창만 이어받는다 (약한 단서로 엉뚱한 창을 빼지 않게)
+    func inheriting(from old: Snapshot) -> Snapshot {
+        var result = self
+        result.otherApps = old.otherApps
+        result.tidySpaces = old.tidySpaces
+        result.spaceStrategy = old.spaceStrategy
+        let excludedApps = Set(old.apps.filter { !$0.isIncluded }.map(\.bundleId))
+        for index in result.apps.indices where excludedApps.contains(result.apps[index].bundleId) {
+            result.apps[index].isIncluded = false
+        }
+        for bundleId in Set(old.windows.filter { !$0.isIncluded }.map(\.bundleId)) {
+            let olds = old.windows.indices.filter { old.windows[$0].bundleId == bundleId }
+            let news = result.windows.indices.filter { result.windows[$0].bundleId == bundleId }
+            var candidates: [(old: Int, new: Int, score: Int)] = []
+            for o in olds {
+                for n in news {
+                    if let score = WindowMatcher.score(saved: old.windows[o], live: result.windows[n]), score >= WindowMatcher.strongScore {
+                        candidates.append((o, n, score))
+                    }
+                }
+            }
+            var usedOld = Set<Int>(), usedNew = Set<Int>()
+            for candidate in candidates.sorted(by: { $0.score > $1.score }) where !usedOld.contains(candidate.old) && !usedNew.contains(candidate.new) {
+                usedOld.insert(candidate.old)
+                usedNew.insert(candidate.new)
+                if !old.windows[candidate.old].isIncluded { result.windows[candidate.new].isIncluded = false }
+            }
         }
         return result
     }

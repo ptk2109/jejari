@@ -35,6 +35,10 @@ final class AppState: ObservableObject {
     /// 저장 확인 창에서 고르는 중인 스냅샷 (기획서 12.6)
     @Published var draft: Snapshot?
     @Published var draftName = ""
+    /// 저장 창에서 덮어쓸 기존 배치. nil이면 새 배치 (이름은 draftName)
+    @Published private(set) var draftTarget: String?
+    /// 방금 찍은 그대로. 대상을 바꿀 때마다 여기서 다시 이어받는다
+    private var capturedDraft: Snapshot?
     /// 배치 관리에서 포함할 창을 다시 고르는 중인 스냅샷
     @Published var editing: Snapshot?
 
@@ -200,23 +204,53 @@ final class AppState: ObservableObject {
         status = "창을 모으는 중…"
         draft = nil
         open(.save)
-        let suggested = snapshots.first?.name ?? "기본"
+        // 처음 고를 대상: 마지막으로 불러온 배치, 없으면 가장 최근 저장한 배치. 하나도 없으면 새 배치
+        let names = snapshotNames
+        let target = names.contains(Self.lastRestoredName) ? Self.lastRestoredName : names.first
         Task.detached {
-            let snapshot = WindowService.capture(name: suggested)
+            let snapshot = WindowService.capture(name: target ?? "")
             await MainActor.run {
                 self.busy = false
                 self.status = ""
-                self.draft = snapshot
-                self.draftName = suggested
+                self.capturedDraft = snapshot
+                self.selectDraftTarget(target)
             }
         }
     }
 
+    /// 저장 창의 대상 바꾸기. 기존 배치면 그 설정과 뺀 앱·창을 이어받고, 새 배치면 찍은 그대로
+    func selectDraftTarget(_ name: String?) {
+        guard let captured = capturedDraft else { return }
+        draftTarget = name
+        if let name, let old = try? SnapshotStore.load(name) {
+            draft = captured.inheriting(from: old)
+            draftName = name
+        } else {
+            draft = captured
+            draftName = ""
+        }
+    }
+
+    /// 저장 창에서 지금 이름으로 저장할 수 있는지. 새 배치는 기존 이름과 겹치면 안 된다 (덮어쓰기는 목록에서 고른다)
+    var draftNameProblem: String? {
+        if draftTarget != nil { return nil }
+        let name = draftName.trimmingCharacters(in: .whitespaces)
+        if name.isEmpty { return "" }
+        if name == SnapshotStore.previousStateName { return "이 이름은 쓸 수 없어요." }
+        if snapshotNames.contains(name) { return "이미 있는 이름이에요. 덮어쓰려면 목록에서 고르세요." }
+        return nil
+    }
+
+    /// 마지막으로 불러온 배치 (되돌리기·검증 제외). 저장 창의 처음 대상
+    private static var lastRestoredName: String {
+        get { UserDefaults.standard.string(forKey: "lastRestoredSnapshot") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "lastRestoredSnapshot") }
+    }
+
     /// 확인 창에서 고른 결과를 저장한다. 뺀 창도 표시만 해서 남긴다
     func commitDraft() {
-        guard var snapshot = draft else { return }
-        let name = draftName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, name != SnapshotStore.previousStateName else { return }
+        guard var snapshot = draft, draftNameProblem == nil else { return }
+        let name = draftTarget ?? draftName.trimmingCharacters(in: .whitespaces)
         snapshot.name = name
         snapshot.createdAt = Date()
         do {
@@ -225,19 +259,25 @@ final class AppState: ObservableObject {
         } catch {
             status = "저장 실패: \(error.localizedDescription)"
         }
-        draft = nil
+        cancelDraft()
         reload()
     }
 
-    func cancelDraft() { draft = nil }
+    func cancelDraft() {
+        draft = nil
+        capturedDraft = nil
+        draftTarget = nil
+    }
 
-    /// 외부 명령용: 확인 창 없이 바로 저장
+    /// 외부 명령용: 확인 창 없이 바로 저장. 같은 이름이 있으면 저장 창처럼 설정과 뺀 앱·창을 이어받는다
     private func save(_ name: String, quiet: Bool) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         busy = true
         status = "창을 모으는 중…"
+        let old = try? SnapshotStore.load(name)
         Task.detached {
-            let snapshot = WindowService.capture(name: name)
+            var snapshot = WindowService.capture(name: name)
+            if let old { snapshot = snapshot.inheriting(from: old) }
             let result = Result { try SnapshotStore.save(snapshot) }
             await MainActor.run {
                 self.busy = false
@@ -261,6 +301,7 @@ final class AppState: ObservableObject {
         guard !trimmed.isEmpty, trimmed != name else { return nil }
         guard trimmed != SnapshotStore.previousStateName else { return "이 이름은 쓸 수 없습니다" }
         do { try SnapshotStore.rename(name, to: trimmed) } catch { return SnapshotStore.exists(trimmed) ? "같은 이름이 이미 있습니다" : error.localizedDescription }
+        if Self.lastRestoredName == name { Self.lastRestoredName = trimmed }
         reload()
         return nil
     }
@@ -347,6 +388,7 @@ final class AppState: ObservableObject {
 
     private func restoreLoaded(_ snapshot: Snapshot, name: String, mode: RestoreMode, isUndo: Bool, quiet: Bool, verifyOnly: Bool) {
         busy = true
+        if !isUndo && !verifyOnly { Self.lastRestoredName = name }
         status = verifyOnly ? "\"\(name)\" 검증 중…" : "\"\(name)\" 불러오는 중… 키보드와 마우스에서 손을 떼 주세요"
         Task.detached {
             let startedAt = Date()
