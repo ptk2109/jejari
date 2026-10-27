@@ -1,0 +1,41 @@
+# XcodeGen 설정. Jejari.xcodeproj는 이 파일에서 생성한다 (`xcodegen generate`). 직접 고치지 않는다.
+name: Jejari
+options:
+  bundleIdPrefix: com.nam24
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Configs/Signing.xcconfig
+  Release: Configs/Signing.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+targets:
+  Jejari:
+    type: application
+    platform: macOS
+    sources:
+      - Jejari
+    info:
+      path: Jejari/Info.plist
+      properties:
+        CFBundleDisplayName: 제자리
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.utilities
+        # jejari://save?name=… 등 외부(스크립트, 단축어)에서 저장/불러오기를 부를 수 있게 한다
+        CFBundleURLTypes:
+          - CFBundleURLName: com.nam24.jejari
+            CFBundleURLSchemes: [jejari]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nam24.jejari
+        PRODUCT_NAME: Jejari
+        CODE_SIGN_STYLE: Automatic
+        # 다른 앱의 창을 제어하고 비공개 API를 쓰므로 샌드박스를 쓰지 않는다 (기획서 7장)
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        GENERATE_INFOPLIST_FILE: NO
