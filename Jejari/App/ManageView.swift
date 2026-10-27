@@ -11,23 +11,39 @@ struct ManageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if state.snapshots.isEmpty {
-                ContentUnavailableView("저장된 배치 없음", systemImage: "rectangle.3.group",
-                                       description: Text("메뉴의 \"현재 배치 저장…\"으로 지금 배치를 저장하세요."))
-            } else {
-                List(state.snapshots, selection: $selection) { snapshot in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(snapshot.name).font(.headline)
-                        Text(detail(snapshot)).font(.caption).foregroundStyle(.secondary)
+            // 왼쪽: 배치 목록, 오른쪽: 고른 배치의 불러올 때 설정
+            HStack(alignment: .top, spacing: 20) {
+                Group {
+                    if state.snapshots.isEmpty {
+                        ContentUnavailableView("저장된 배치 없음", systemImage: "rectangle.3.group",
+                                               description: Text("메뉴의 \"현재 배치 저장…\"으로 지금 배치를 저장하세요."))
+                    } else {
+                        List(state.snapshots, selection: $selection) { snapshot in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(snapshot.name).font(.headline)
+                                Text(detail(snapshot)).font(.caption).foregroundStyle(.secondary)
+                            }
+                            .tag(snapshot.name)
+                            .contextMenu { actions(for: snapshot.name) }
+                        }
                     }
-                    .tag(snapshot.name)
-                    .contextMenu { actions(for: snapshot.name) }
                 }
-            }
-            if let selection, let snapshot = state.snapshots.first(where: { $0.name == selection }) {
-                OtherAppsPicker(policy: Binding(get: { snapshot.otherAppsPolicy }, set: { state.setOtherApps(selection, $0) }),
-                                tidySpaces: Binding(get: { snapshot.tidySpaces ?? false }, set: { state.setTidySpaces(selection, $0) }),
-                                strategy: Binding(get: { snapshot.spaceStrategy ?? .auto }, set: { state.setSpaceStrategy(selection, $0) }))
+                .frame(width: 380)
+                ScrollView {
+                    if let selection, let snapshot = state.snapshots.first(where: { $0.name == selection }) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("\"\(selection)\" 불러올 때").font(.title3.bold())
+                            OtherAppsPicker(policy: Binding(get: { snapshot.otherAppsPolicy }, set: { state.setOtherApps(selection, $0) }),
+                                            tidySpaces: Binding(get: { snapshot.tidySpaces ?? false }, set: { state.setTidySpaces(selection, $0) }),
+                                            strategy: Binding(get: { snapshot.spaceStrategy ?? .auto }, set: { state.setSpaceStrategy(selection, $0) }))
+                        }
+                        .padding(.trailing, 8)
+                    } else {
+                        Text("왼쪽에서 배치를 고르면 불러올 때 설정을 바꿀 수 있어요.")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 200)
+                    }
+                }
             }
             HStack {
                 Button("불러오기") { if let selection { state.restore(selection) } }
@@ -47,8 +63,8 @@ struct ManageView: View {
                 }
             }
         }
-        .padding(16)
-        .frame(width: 600, height: 560)
+        .padding(20)
+        .frame(width: 1000, height: 760)
         .onAppear { state.reload() }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("새 이름", text: $newName)

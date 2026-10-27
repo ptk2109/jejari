@@ -98,6 +98,8 @@ final class AppState: ObservableObject {
         case "restore": restore(name, mode: mode, quiet: true)
         case "verify": restore(name, quiet: true, verifyOnly: true)
         case "undo": restore(SnapshotStore.previousStateName, mode: .arrange, isUndo: true, quiet: true)
+        case "collapse": collapse(quiet: true)
+        case "wipe": wipe(quiet: true)
         case "grant":
             // 권한 요청 창을 띄워 손쉬운 사용 목록에 제자리를 올리고 설정 화면을 연다
             if let item = SettingsCheck.items().first(where: { $0.id == "accessibility" }) { SettingsCheck.perform(item) }
@@ -381,6 +383,81 @@ final class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: 🧰 정리하기
+
+    /// 🧲 한 화면으로 모으기: 모니터마다 1번만 남기고 가상화면을 지운다. 되돌리기로 되돌릴 수 있다
+    func collapse(quiet: Bool = false) {
+        guard ensureAccessibility(quiet: quiet), !busy else { return }
+        let count = CleanupService.removableSpaceCount()
+        if !quiet {
+            guard count > 0 else { return info("지울 가상화면이 없어요", "이미 모니터마다 화면이 하나뿐이에요.") }
+            guard confirm("가상화면 \(count)개를 지우고 모든 창을 1번 화면으로 모아요",
+                          "앱은 끄지 않아요. 메뉴의 ↩️ 되돌리기로 원래 가상화면과 창 위치로 돌아갈 수 있어요.",
+                          ok: "모으기") else { return }
+        }
+        runCleanup(title: "🧲 한 화면으로 모으기", quitApps: [], quiet: quiet)
+    }
+
+    /// 🧹 깨끗하게 비우기: 가상화면을 모두 지우고 앱에 종료를 요청한다 (제자리, Finder, 항상 건드리지 않을 앱은 빼고)
+    func wipe(quiet: Bool = false) {
+        guard ensureAccessibility(quiet: quiet), !busy else { return }
+        let targets = CleanupService.quitTargets()
+        if !quiet {
+            let names = targets.compactMap(\.localizedName)
+            guard confirm("가상화면 \(CleanupService.removableSpaceCount())개를 지우고 앱 \(names.count)개에 종료를 요청해요",
+                          names.joined(separator: ", ") + "\n\n저장 안 한 문서가 있으면 각 앱이 저장할지 물어요. Finder와 '항상 건드리지 않을 앱'은 끄지 않아요.\n↩️ 되돌리기는 가상화면과 창 위치만 되돌리고, 끈 앱을 다시 켜지는 않아요.",
+                          ok: "비우기") else { return }
+        }
+        runCleanup(title: "🧹 깨끗하게 비우기", quitApps: targets, quiet: quiet)
+    }
+
+    private func runCleanup(title: String, quitApps: [NSRunningApplication], quiet: Bool) {
+        busy = true
+        status = "\(title) 중… 키보드와 마우스에서 손을 떼 주세요"
+        Task.detached {
+            // 되돌리기용 직전 상태
+            try? SnapshotStore.save(WindowService.capture(name: SnapshotStore.previousStateName))
+            let log = LogBox()
+            var report = RestoreReport()
+            report.spaces = CleanupService.collapseSpaces { message in
+                log.append(message)
+                Task { @MainActor in self.status = message }
+            }
+            report.otherApps = CleanupService.quit(quitApps).map { "\($0) (종료 요청)" }
+            await MainActor.run {
+                self.busy = false
+                self.lastReport = report
+                self.lastReportName = title
+                self.status = "\(title) 끝: 가상화면 정리 \(report.spaces.count)곳\(quitApps.isEmpty ? "" : ", 앱 \(report.otherApps.count)개 종료 요청")"
+                self.reload()
+                if quiet {
+                    self.writeResult(ActionResult(action: quitApps.isEmpty ? "collapse" : "wipe", name: "", finishedAt: Date(), ok: true,
+                                                  summary: self.status, problems: report.problems, log: report.spaces + report.otherApps))
+                } else {
+                    self.notify(report)
+                }
+            }
+        }
+    }
+
+    private func confirm(_ title: String, _ message: String, ok: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: ok)
+        alert.addButton(withTitle: "취소")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func info(_ title: String, _ message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     /// 되돌리기는 ① 배치만으로 (기획서 12.5)

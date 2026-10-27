@@ -27,6 +27,12 @@ struct MenuView: View {
 
         Button("🗂 배치 관리…") { state.open(.manage) }
 
+        Menu("🧰 정리하기") {
+            Button("🧲 한 화면으로 모으기 (가상화면을 지우고 창을 한 곳에)") { state.collapse() }
+            Button("🧹 깨끗하게 비우기 (가상화면을 지우고 앱 종료)") { state.wipe() }
+        }
+        .disabled(state.busy)
+
         Divider()
 
         if !state.status.isEmpty {
