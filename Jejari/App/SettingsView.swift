@@ -27,6 +27,7 @@ private struct GeneralSettings: View {
     @State private var autoLoadName = StartupService.autoLoadName
     @State private var autoLoadDelay = StartupService.autoLoadDelay
     @State private var logging = RunLogStore.isEnabled
+    @State private var externalCommands = AppState.allowsExternalCommands
     @ObservedObject private var updates = UpdateService.shared
 
     var body: some View {
@@ -86,6 +87,14 @@ private struct GeneralSettings: View {
                 ])
                 Button("지금 확인") { UpdateService.shared.checkNow() }
                     .disabled(!updates.canCheck)
+
+                OptionGroup(title: "다른 앱이나 스크립트가 제자리를 부를 수 있게 할까요?", selection: Binding(get: { externalCommands }, set: { on in
+                    AppState.allowsExternalCommands = on
+                    externalCommands = AppState.allowsExternalCommands
+                }), disabled: AppState.isDevBuild, notes: AppState.isDevBuild ? ["⚠️ 개발 빌드는 시험용으로 항상 허용하고, 확인 창도 띄우지 않아요."] : [], options: [
+                    (false, "허용 안 함 (추천)", "제자리는 메뉴에서만 써요. 웹페이지나 다른 앱이 jejari:// 주소로 배치를 불러오거나 저장할 수 없어요."),
+                    (true, "허용", "단축어, 스크립트, 다른 앱이 jejari://restore?name=회사 같은 주소로 불러오기·저장·되돌리기를 부를 수 있어요. 가상화면을 지우거나 앱을 끄는 명령은 그래도 매번 확인 창을 띄워요.\n예) 단축어 앱의 '회사 와이파이에 연결되면' 자동화로 회사 배치 불러오기."),
+                ])
             }
             .padding(20)
         }
