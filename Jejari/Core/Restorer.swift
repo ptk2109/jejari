@@ -254,11 +254,7 @@ final class Restorer: @unchecked Sendable {
 
     /// Dock 아이콘을 누른 것과 같은 "다시 열기" 요청. 대부분의 앱이 창이 없으면 새 창을 만든다
     private func reopen(_ path: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-g", "-a", path]  // -g: 앞으로 가져오지 않음
-        try? process.run()
-        process.waitUntilExit()
+        ExternalCommand.openInBackground(app: path)
     }
 
     // MARK: 창 배치
