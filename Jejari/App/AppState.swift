@@ -71,7 +71,7 @@ final class AppState: ObservableObject {
 
     /// 창 제목 (SwiftUI Window 장면과 같게)
     private static let windowTitles: [AppWindow: String] = [
-        .save: "배치 저장", .edit: "배치 창 고르기", .manage: "배치 관리", .result: "불러오기 결과", .settings: "제자리 설정 점검",
+        .save: "배치 저장", .edit: "배치 창 고르기", .manage: "배치 관리", .result: "불러오기 결과", .settings: "제자리 설정",
     ]
 
     /// 창을 열고 지금 보고 있는 가상화면의 맨 앞으로 가져온다.
@@ -127,6 +127,10 @@ final class AppState: ObservableObject {
                 let log = DebugTools.drag(appQuery: app, to: to)
                 await MainActor.run { self.writeResult(ActionResult(action: "debugdrag", name: app, finishedAt: Date(), ok: true, summary: "끌기 시험", log: log)) }
             }
+        case "debugwindows":
+            // 제자리 자신의 창 목록 (제목, 크기, 보이는지)
+            writeResult(ActionResult(action: "debugwindows", name: "", finishedAt: Date(), ok: true, summary: "",
+                                     log: NSApp.windows.map { "\($0.title.isEmpty ? "(제목 없음)" : $0.title) \(Int($0.frame.width))x\(Int($0.frame.height)) 보임=\($0.isVisible) \(type(of: $0))" }))
         case "debugscan":
             // jejari://debugscan?app=…: 그 앱의 모든 AX 창(원격 토큰)과 분류
             let appQuery = (query.first { $0.name == "app" }?.value ?? "").lowercased()

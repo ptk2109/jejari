@@ -41,7 +41,7 @@ struct OtherAppsPicker: View {
         }
         let keep = OtherAppsService.alwaysKeep.map(OtherAppsService.appName).sorted()
         if !keep.isEmpty {
-            notes.append("항상 건드리지 않을 앱(\(keep.joined(separator: ", ")))은 여기서 빠져요. 설정 점검 창에서 바꿀 수 있어요.")
+            notes.append("항상 건드리지 않을 앱(\(keep.joined(separator: ", ")))은 여기서 빠져요. 설정 → 항상 건드리지 않을 앱에서 바꿀 수 있어요.")
         }
         return notes
     }
