@@ -26,7 +26,8 @@ struct ManageView: View {
             }
             if let selection, let snapshot = state.snapshots.first(where: { $0.name == selection }) {
                 OtherAppsPicker(policy: Binding(get: { snapshot.otherAppsPolicy }, set: { state.setOtherApps(selection, $0) }),
-                                tidySpaces: Binding(get: { snapshot.tidySpaces ?? false }, set: { state.setTidySpaces(selection, $0) }))
+                                tidySpaces: Binding(get: { snapshot.tidySpaces ?? false }, set: { state.setTidySpaces(selection, $0) }),
+                                strategy: Binding(get: { snapshot.spaceStrategy ?? .auto }, set: { state.setSpaceStrategy(selection, $0) }))
             }
             HStack {
                 Button("불러오기") { if let selection { state.restore(selection) } }
@@ -47,7 +48,7 @@ struct ManageView: View {
             }
         }
         .padding(16)
-        .frame(width: 600, height: 500)
+        .frame(width: 600, height: 560)
         .onAppear { state.reload() }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("새 이름", text: $newName)

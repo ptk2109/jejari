@@ -19,6 +19,21 @@ enum OtherAppsPolicy: String, Codable, CaseIterable {
     }
 }
 
+/// 가상화면을 맞추는 방식
+enum SpaceStrategy: String, Codable, CaseIterable {
+    case auto           // 자동: 모니터 구성이 다르거나 화면이 뒤죽박죽이면 초기화, 아니면 필요한 것만
+    case incremental    // 필요한 것만: 지금 화면을 살리고 다른 창만 옮김 (빠름)
+    case reset          // 초기화 후 다시 만들기: 1번만 남기고 지워 모든 창을 1번에 모은 뒤 순서대로 다시 만듦 (정확, 느림)
+
+    var title: String {
+        switch self {
+        case .auto: "자동"
+        case .incremental: "필요한 것만"
+        case .reset: "초기화 후 다시 만들기"
+        }
+    }
+}
+
 struct Snapshot: Codable, Identifiable {
     var id: String { name }
     var name: String
@@ -27,6 +42,8 @@ struct Snapshot: Codable, Identifiable {
     var otherApps: OtherAppsPolicy? = nil
     /// 남는 가상화면 정리: 필요한 화면 뒤의 남는 화면의 창을 보관 화면 하나로 모으고 빈 화면을 지운다. nil이면 끔
     var tidySpaces: Bool? = nil
+    /// 가상화면 맞추는 방식. nil이면 자동
+    var spaceStrategy: SpaceStrategy? = nil
     var displays: [SavedDisplay]
     var spaces: [SavedDisplaySpaces]
     var apps: [SavedApp]

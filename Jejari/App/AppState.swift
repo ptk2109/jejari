@@ -123,9 +123,11 @@ final class AppState: ObservableObject {
             }
         case "debugremove":
             let index = Int(query.first { $0.name == "index" }?.value ?? "") ?? 0
+            let view = Int(query.first { $0.name == "view" }?.value ?? "")
             Task.detached {
                 var log: [String] = []
                 if let main = DisplayService.current().first(where: \.isMain) {
+                    if let view { log.append("먼저 #\(view) 보기: \(SpaceService.switchTo(display: main.uuid, index: view))") }
                     let n = SpaceService.removeSpaces(display: main.uuid, screen: main.frame, indexes: [index]) { log.append($0) }
                     log.append("삭제 \(n)개, 지금 \(SpaceService.layout().first { $0.displayUuid == main.uuid }?.ids.count ?? -1)개")
                 }
@@ -266,6 +268,13 @@ final class AppState: ObservableObject {
     func setOtherApps(_ name: String, _ policy: OtherAppsPolicy) {
         guard var snapshot = try? SnapshotStore.load(name) else { return }
         snapshot.otherAppsPolicy = policy
+        try? SnapshotStore.save(snapshot)
+        reload()
+    }
+
+    func setSpaceStrategy(_ name: String, _ strategy: SpaceStrategy) {
+        guard var snapshot = try? SnapshotStore.load(name) else { return }
+        snapshot.spaceStrategy = strategy == .auto ? nil : strategy
         try? SnapshotStore.save(snapshot)
         reload()
     }

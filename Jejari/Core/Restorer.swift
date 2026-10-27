@@ -42,6 +42,40 @@ final class Restorer: @unchecked Sendable {
     private var bridgeFailed = false
     /// 배치한 창이 들어간 (모니터, Space 번호). 가상화면 정리 때 "필요한 화면"으로 본다
     private var usedSpaces: [String: Set<Int>] = [:]
+    /// 가상화면 초기화 후 다시 만들기 (② 전체 복원에서만)
+    private var resetSpaces = false
+
+    // MARK: 가상화면 초기화
+
+    /// 자동이면: 스냅샷의 모니터가 없거나, 화면 uuid가 맞지 않으면서 화면 수가 2개 이상 다를 때 초기화
+    private func shouldReset() -> Bool {
+        switch snapshot.spaceStrategy ?? .auto {
+        case .reset: return true
+        case .incremental: return false
+        case .auto:
+            if snapshot.displays.contains(where: { displays[$0.uuid] == nil }) { return true }
+            let layout = SpaceService.layout()
+            return snapshot.spaces.contains { saved in
+                guard let live = layout.first(where: { $0.displayUuid == saved.displayUuid }) else { return false }
+                let uuidsMatch = Set(saved.spaces.map(\.uuid)).isSubset(of: Set(live.uuids))
+                return !uuidsMatch && abs(live.ids.count - saved.spaces.count) >= 2
+            }
+        }
+    }
+
+    /// 모니터마다 1번만 남기고 가상화면을 지운다. 지운 화면의 창은 1번으로 모인다 (0단계: 보고 있는 화면과 상관없이 1번)
+    /// 전체 화면 Space는 건드리지 않는다
+    private func clearSpaces() {
+        for display in displays.keys {
+            guard let screen = DisplayService.current().first(where: { $0.uuid == display })?.frame,
+                  let layout = SpaceService.layout().first(where: { $0.displayUuid == display }), layout.ids.count > 1 else { continue }
+            _ = SpaceService.switchTo(display: display, index: 1)
+            let targets = (2...layout.ids.count).filter { layout.types[$0 - 1] != 4 }
+            let removed = SpaceService.removeSpaces(display: display, screen: screen, indexes: targets)
+            report.spaces.append("가상화면 초기화: \(removed)개를 지우고 창을 1번에 모음")
+            progress("가상화면 초기화: \(layout.ids.count)개 → \(layout.ids.count - removed)개")
+        }
+    }
     private var report = RestoreReport()
 
     /// dryRun: 옮기지 않고 저장된 자리와 다른 창만 moved에 담는다 (검증용)
@@ -55,7 +89,9 @@ final class Restorer: @unchecked Sendable {
     func run() -> RestoreReport {
         displays = Dictionary(uniqueKeysWithValues: DisplayService.current().map { ($0.uuid, $0.frame) })
         var windows = snapshot.includedWindows  // 사용자가 뺀 창은 건드리지 않는다
+        resetSpaces = !dryRun && mode == .full && shouldReset()
         let extraSpaces = substituteMissingDisplays(&windows)
+        if resetSpaces { clearSpaces() }
 
         if !dryRun && SkyLight.hotKeysAvailable && !SpaceService.disabledDesktopHotKeys().isEmpty {
             SpaceService.enableDesktopHotKeys()
@@ -117,7 +153,7 @@ final class Restorer: @unchecked Sendable {
             let savedSpaces = snapshot.spaces.first { $0.displayUuid == missing.uuid }?.spaces ?? []
             var notFound: [SavedSpace] = []
             for space in savedSpaces {
-                if let home = layout.first(where: { $0.uuids.contains(space.uuid) }), let target = live.first(where: { $0.uuid == home.displayUuid }) {
+                if !resetSpaces, let home = layout.first(where: { $0.uuids.contains(space.uuid) }), let target = live.first(where: { $0.uuid == home.displayUuid }) {
                     followedUuids.insert(space.uuid)
                     for i in windows.indices where windows[i].displayUuid == missing.uuid && windows[i].spaceUuid == space.uuid {
                         remap(i, from: missing, to: target)
@@ -128,7 +164,8 @@ final class Restorer: @unchecked Sendable {
                 }
             }
             guard !notFound.isEmpty, let target = live.max(by: { similarity($0, missing) < similarity($1, missing) }) else { continue }
-            let base = max(savedSpaceCount(target.uuid), layout.first { $0.displayUuid == target.uuid }?.ids.count ?? 0) + (extra[target.uuid] ?? 0)
+            // 초기화하면 대상 모니터는 스냅샷 화면 수만큼만 남으므로 그 뒤에 붙인다
+            let base = (resetSpaces ? savedSpaceCount(target.uuid) : max(savedSpaceCount(target.uuid), layout.first { $0.displayUuid == target.uuid }?.ids.count ?? 0)) + (extra[target.uuid] ?? 0)
             extra[target.uuid, default: 0] += notFound.count
             progress("\(missing.name)의 가상화면 \(notFound.map { String($0.index) }.joined(separator: ", ")) → \(target.name)의 \(base + 1)번부터 새로 만듦")
             for (k, space) in notFound.enumerated() {
@@ -159,8 +196,9 @@ final class Restorer: @unchecked Sendable {
         for display in displays.keys {
             guard let frame = DisplayService.current().first(where: { $0.uuid == display })?.frame else { continue }
             let have = layout.first { $0.displayUuid == display }?.ids.count ?? 0
-            // 대체로 붙이는 Space는 지금 있는 Space 뒤에 붙인다 (substituteMissingDisplays의 base와 같은 기준)
-            let need = extra[display] == nil ? savedSpaceCount(display) : max(savedSpaceCount(display), have) + extra[display]!
+            // 대체로 붙이는 Space는 지금 있는 Space 뒤에 붙인다 (substituteMissingDisplays의 base와 같은 기준). 초기화했으면 스냅샷 수 뒤에
+            let need = extra[display] == nil ? savedSpaceCount(display)
+                : (resetSpaces ? savedSpaceCount(display) : max(savedSpaceCount(display), have)) + extra[display]!
             guard need > have else { continue }
             let added = SpaceService.addSpaces(display: display, screen: frame, count: need - have)
             progress("Space \(have)개 → \(need)개 필요, \(added)개 추가")
@@ -177,6 +215,7 @@ final class Restorer: @unchecked Sendable {
             useUuid[saved.displayUuid] = !saved.spaces.isEmpty && Set(saved.spaces.map(\.uuid)).isSubset(of: liveUuids)
         }
         for display in extra.keys { useUuid[display] = useUuid[display] ?? false }
+        if resetSpaces { for key in useUuid.keys { useUuid[key] = false } }
     }
 
     private func targetIndex(_ window: SavedWindow) -> Int {

@@ -4,6 +4,7 @@ import SwiftUI
 struct OtherAppsPicker: View {
     @Binding var policy: OtherAppsPolicy
     @Binding var tidySpaces: Bool
+    @Binding var strategy: SpaceStrategy
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
@@ -18,6 +19,23 @@ struct OtherAppsPicker: View {
         Text(explanation).font(.caption).foregroundStyle(.secondary)
         Toggle("남는 가상화면 정리 (필요한 화면 뒤의 창은 보관 화면 하나로 모으고 빈 화면은 지움)", isOn: $tidySpaces)
             .font(.callout)
+        HStack(alignment: .firstTextBaseline) {
+            Text("가상화면 맞추는 방식")
+            Picker("", selection: $strategy) {
+                ForEach(SpaceStrategy.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .frame(width: 200)
+        }
+        Text(strategyExplanation).font(.caption).foregroundStyle(.secondary)
+    }
+
+    private var strategyExplanation: String {
+        switch strategy {
+        case .auto: "모니터 구성이 다르거나 화면이 뒤죽박죽이면 초기화하고, 아니면 필요한 것만 옮깁니다."
+        case .incremental: "지금 가상화면을 살리고 다른 창만 옮깁니다. 빠릅니다."
+        case .reset: "1번만 남기고 가상화면을 지워 모든 창을 모은 뒤 순서대로 다시 만듭니다. 정확하지만 모든 창을 옮겨서 느립니다."
+        }
     }
 
     private var explanation: String {
