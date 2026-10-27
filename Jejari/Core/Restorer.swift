@@ -34,6 +34,9 @@ final class Restorer: @unchecked Sendable {
     private var useUuid: [String: Bool] = [:]
     /// 없는 모니터에 있던 Space 중 macOS가 다른 모니터로 옮겨 둔 것(uuid가 남아 있음). 이 창들은 uuid로 찾는다
     private var followedUuids = Set<String>()
+    /// 모니터가 1대일 때 Space 이동의 경유지로 잠깐 만드는 가상 모니터 (필요할 때 한 번 만들고 끝나면 없앤다)
+    private var bridge: VirtualDisplay?
+    private var bridgeFailed = false
     private var report = RestoreReport()
 
     /// dryRun: 옮기지 않고 저장된 자리와 다른 창만 moved에 담는다 (검증용)
@@ -56,7 +59,23 @@ final class Restorer: @unchecked Sendable {
         if !dryRun { addMissingSpaces(extraSpaces) }
         chooseSpaceLookup(extraSpaces)
         if mode == .full { launchApps() }
+        // 모니터가 1대이고 여러 Space에 걸친 배치면 임시 모니터를 처음에 만든다.
+        // 만들 때 macOS가 화면보다 큰 창을 줄이는 등 창을 흔들기 때문에, 배치하기 전에 끝나게 한다
+        if !dryRun && displays.count == 1 && Set(windows.map(\.spaceIndex)).count > 1 {
+            bridge = VirtualDisplay()
+            if bridge == nil { bridgeFailed = true } else { progress("모니터가 1대라 임시 모니터를 만듦") }
+        }
         placeWindows(windows)
+        if let bridge {
+            bridge.remove()
+            self.bridge = nil
+            progress("임시 모니터 제거")
+            // macOS가 모니터 구성 변경 뒤 창을 조정하는 것이 조금 늦게 일어나므로 기다렸다가 두 번 맞춘다
+            usleep(1_000_000)
+            fixFramesAfterBridge(windows)
+            usleep(500_000)
+            fixFramesAfterBridge(windows)
+        }
         if !dryRun { returnToSavedSpaces() }
         return report
     }
@@ -331,11 +350,19 @@ final class Restorer: @unchecked Sendable {
             usleep(500_000)
         }
         if !samePlace {
-            let other = displays.first(where: { $0.key != saved.displayUuid })?.value
+            var other = displays.first(where: { $0.key != saved.displayUuid })?.value
+            // 모니터가 1대뿐이면 거쳐 갈 임시 가상 모니터를 만든다 (마우스 없이, 0단계 "모니터 경유" 방식 그대로)
+            if other == nil && now?.display == saved.displayUuid && !bridgeFailed {
+                if bridge == nil {
+                    bridge = VirtualDisplay()
+                    if bridge == nil { bridgeFailed = true } else { progress("모니터가 1대라 임시 모니터를 만듦") }
+                }
+                other = bridge?.frame
+            }
             if now?.display == saved.displayUuid && other == nil {
                 // 모니터가 1대뿐이라 거쳐 갈 곳이 없음: 제목 표시줄을 잡고 Space를 바꾼다 (마우스를 잠깐 씀)
                 guard SpaceService.moveByDrag(element: element, windowID: live.windowID, display: saved.displayUuid, to: index) else {
-                    report.problems.append("\(name): 가상화면 \(index)번으로 옮기지 못함 (모니터 1대, 끌어서 옮기기 실패)")
+                    report.problems.append("\(name): 가상화면 \(index)번으로 옮기지 못함 (모니터 1대, 임시 모니터와 끌어서 옮기기 모두 실패)")
                     return
                 }
             } else {
@@ -367,6 +394,32 @@ final class Restorer: @unchecked Sendable {
         }
         report.moved.append(name)
         progress("\(name) 이동")
+    }
+
+    /// 임시 모니터를 없애면 macOS가 다시 창 크기를 줄이는 등 흔든다. 같은 Space에 있는 창의 위치·크기만 다시 맞추고
+    /// 크기 문제는 이 마지막 결과로 다시 판단한다
+    private func fixFramesAfterBridge(_ windows: [SavedWindow]) {
+        report.problems.removeAll { $0.contains("(앱이 크기를 제한함)") }
+        for (bundleId, indexes) in Dictionary(grouping: windows.indices, by: { windows[$0].bundleId }) {
+            var live: [LiveWindow] = []
+            for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleId) { live += WindowService.scan(pid: app.processIdentifier).windows }
+            for pair in WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, allowWeak: true) {
+                let saved = windows[pair.savedIndex], element = pair.live.element
+                guard (AX.attribute(element, kAXMinimizedAttribute) as Bool?) != true else { continue }
+                var frame = AX.frame(element)
+                if abs(frame.minX - saved.frame.minX) >= 2 || abs(frame.minY - saved.frame.minY) >= 2
+                    || abs(frame.width - saved.frame.width) >= 2 || abs(frame.height - saved.frame.height) >= 2 {
+                    AX.setPosition(element, saved.frame.origin)
+                    AX.setSize(element, saved.frame.size)
+                    AX.setPosition(element, saved.frame.origin)
+                    usleep(100_000)
+                    frame = AX.frame(element)
+                }
+                if abs(frame.width - saved.frame.width) >= 2 || abs(frame.height - saved.frame.height) >= 2 {
+                    report.problems.append("\(saved.appName) \"\(saved.title.prefix(30))\": 크기 \(Int(frame.width))x\(Int(frame.height)) (앱이 크기를 제한함)")
+                }
+            }
+        }
     }
 
     /// 모니터마다 저장 당시 보던 Space로 돌아간다 (uuid 우선, 없으면 번호)

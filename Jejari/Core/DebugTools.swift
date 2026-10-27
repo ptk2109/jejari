@@ -17,6 +17,37 @@ enum DebugTools {
         return log
     }
 
+    /// 가상 모니터를 만들어 앱의 첫 창을 그 모니터를 거쳐 다른 Space로 옮긴다 (jejari://debugvd?app=…&to=…)
+    static func virtualBounce(appQuery: String, to index: Int) -> [String] {
+        var log: [String] = []
+        guard let app = WindowService.regularApps().first(where: { ($0.bundleIdentifier ?? "").lowercased().contains(appQuery.lowercased()) }),
+              let window = WindowService.scan(pid: app.processIdentifier).windows.first,
+              let from = SpaceService.location(of: window.windowID) else { return ["앱/창 없음"] }
+        log.append("\(app.localizedName ?? "?") \"\(window.title.prefix(30))\" #\(from.index) → #\(index)")
+        let original = AX.frame(window.element)
+        let t0 = Date()
+        guard let virtual = VirtualDisplay() else { return log + ["가상 모니터를 만들지 못함"] }
+        log.append(String(format: "가상 모니터 생성 %.1f초: id %d, %@, 위치 %@", Date().timeIntervalSince(t0), virtual.displayID, virtual.uuid ?? "?", "\(virtual.frame)"))
+        log.append("모니터 목록: \(DisplayService.current().map { "\($0.name) \($0.frame)" })")
+        log.append("Space: \(SpaceService.layout().map { "\($0.displayUuid.prefix(8)) \($0.ids.count)개" })")
+        let switched = SpaceService.switchTo(display: from.display, index: index)
+        log.append("목표 #\(index)로 전환: \(switched)")
+        AX.setPosition(window.element, CGPoint(x: virtual.frame.minX + 40, y: virtual.frame.minY + 40))
+        usleep(400_000)
+        log.append("가상 모니터로 보낸 뒤: \(SpaceService.location(of: window.windowID).map { "\($0.display.prefix(8)) #\($0.index)" } ?? "?")")
+        AX.setPosition(window.element, original.origin)
+        AX.setSize(window.element, original.size)
+        usleep(400_000)
+        let after = SpaceService.location(of: window.windowID)
+        log.append("되돌린 뒤: \(after.map { "\($0.display.prefix(8)) #\($0.index)" } ?? "?"), 위치 \(AX.frame(window.element).origin)")
+        let t1 = Date()
+        virtual.remove()
+        log.append(String(format: "가상 모니터 제거 %.1f초, 남은 모니터 %d대, Space %@", Date().timeIntervalSince(t1), DisplayService.current().count,
+                          "\(SpaceService.layout().map { "\($0.displayUuid.prefix(8)) \($0.ids.count)개" })"))
+        log.append("최종: \(SpaceService.location(of: window.windowID).map { "#\($0.index)" } ?? "?") \(after?.index == index ? "성공" : "실패")")
+        return log
+    }
+
     static func scramble() -> [String] {
         var log: [String] = []
         let displays = DisplayService.current()
@@ -55,11 +86,17 @@ enum DebugTools {
                     AX.setPosition(item.window.element, original.origin)
                     log.append("\(item.name): #\(item.index) → #\(target) (Space \(count)개 중)")
                 }
-            } else if SpaceService.moveByDrag(element: item.window.element, windowID: item.window.windowID, display: item.display, to: target,
-                                              log: { log.append("   드래그: \($0)") }) {
-                log.append("\(item.name): #\(item.index) → #\(target) (끌어서, Space \(count)개 중)")
+            } else if let virtual = VirtualDisplay() {
+                // 모니터가 1대면 임시 가상 모니터를 거쳐 옮긴다
+                if SpaceService.switchTo(display: item.display, index: target) {
+                    AX.setPosition(item.window.element, CGPoint(x: virtual.frame.minX + 40, y: virtual.frame.minY + 40))
+                    usleep(400_000)
+                    AX.setPosition(item.window.element, original.origin)
+                    log.append("\(item.name): #\(item.index) → #\(target) (임시 모니터 경유, Space \(count)개 중)")
+                }
+                virtual.remove()
             } else {
-                log.append("\(item.name): 끌어서 옮기기 실패")
+                log.append("\(item.name): 임시 모니터를 만들지 못함")
             }
         }
         // 3) 크기와 위치 바꾸기

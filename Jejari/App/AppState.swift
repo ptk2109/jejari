@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// 외부 명령(jejari://)의 결과. Application Support/Jejari/last-result.json에 남긴다
 struct ActionResult: Codable {
@@ -120,6 +120,13 @@ final class AppState: ObservableObject {
             Task.detached {
                 let log = DebugTools.drag(appQuery: app, to: to)
                 await MainActor.run { self.writeResult(ActionResult(action: "debugdrag", name: app, finishedAt: Date(), ok: true, summary: "끌기 시험", log: log)) }
+            }
+        case "debugvd":
+            let app = query.first { $0.name == "app" }?.value ?? ""
+            let to = Int(query.first { $0.name == "to" }?.value ?? "") ?? 1
+            Task.detached {
+                let log = DebugTools.virtualBounce(appQuery: app, to: to)
+                await MainActor.run { self.writeResult(ActionResult(action: "debugvd", name: app, finishedAt: Date(), ok: true, summary: "가상 모니터 시험", log: log)) }
             }
         case "scramble":
             guard AXIsProcessTrusted(), !busy else { return }

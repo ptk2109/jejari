@@ -39,4 +39,6 @@ targets:
         # 다른 앱의 창을 제어하고 비공개 API를 쓰므로 샌드박스를 쓰지 않는다 (기획서 7장)
         ENABLE_APP_SANDBOX: NO
         ENABLE_HARDENED_RUNTIME: NO
+        # 비공개 CGVirtualDisplay 선언 (Core/CGVirtualDisplay.h)
+        SWIFT_OBJC_BRIDGING_HEADER: Jejari/Core/CGVirtualDisplay.h
         GENERATE_INFOPLIST_FILE: NO
