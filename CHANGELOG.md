@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-28
+
 ### 추가
 
 - ② 전체 복원: 파일을 보여 주던 창(Xcode, 미리보기 등)은 그 파일을 다시 연다. 꺼진 앱은 그 파일로 실행한다
@@ -81,7 +83,8 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ptk2109/jejari/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ptk2109/jejari/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ptk2109/jejari/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ptk2109/jejari/compare/v0.1.0...v0.2.0

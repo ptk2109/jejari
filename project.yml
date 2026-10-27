@@ -29,8 +29,8 @@ targets:
       path: Jejari/Info.plist
       properties:
         CFBundleDisplayName: 제자리
-        CFBundleShortVersionString: "0.4.0"
-        CFBundleVersion: "4"
+        CFBundleShortVersionString: "0.5.0"
+        CFBundleVersion: "5"
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.utilities
         NSAppleEventsUsageDescription: 저장할 때 브라우저 창의 탭 주소를 읽어 불러올 때 다시 엽니다.
