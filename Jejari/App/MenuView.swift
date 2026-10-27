@@ -3,6 +3,7 @@ import SwiftUI
 /// 메뉴바 메뉴 (기획서 2장)
 struct MenuView: View {
     @EnvironmentObject private var state: AppState
+    @ObservedObject private var updates = UpdateService.shared
 
     var body: some View {
         Button("📸 현재 배치 저장…") { state.startSave() }
@@ -46,6 +47,10 @@ struct MenuView: View {
         Button(state.needsAttention ? "⚠️ 설정… (확인 필요)" : "⚙️ 설정…") {
             state.reload()
             state.open(.settings)
+        }
+        if UpdateService.isAvailable {
+            Button("업데이트 확인…") { UpdateService.shared.checkNow() }
+                .disabled(!updates.canCheck)
         }
 
         Divider()

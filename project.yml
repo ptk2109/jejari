@@ -8,6 +8,11 @@ options:
 configFiles:
   Debug: Configs/Signing.xcconfig
   Release: Configs/Signing.xcconfig
+packages:
+  # 자동 업데이트
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.10.1"
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -18,6 +23,8 @@ targets:
     platform: macOS
     sources:
       - Jejari
+    dependencies:
+      - package: Sparkle
     info:
       path: Jejari/Info.plist
       properties:
@@ -31,6 +38,12 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.nam24.jejari
             CFBundleURLSchemes: [jejari]
+        # 자동 업데이트 (Sparkle): 최신 GitHub Release의 appcast.xml을 하루에 한 번 확인한다.
+        # 업데이트 파일은 SUPublicEDKey의 짝인 비밀 키로 서명한다 (docs/개발.md 버전 내기)
+        SUFeedURL: https://github.com/ptk2109/jejari/releases/latest/download/appcast.xml
+        SUPublicEDKey: zbmiG+KD5xsLb9/PuAxuAb1UejPPkQgMU20bjRWb+gc=
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nam24.jejari
