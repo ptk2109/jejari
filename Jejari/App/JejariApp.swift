@@ -20,26 +20,31 @@ struct JejariApp: App {
             SaveView().environmentObject(state)
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
 
         Window("배치 창 고르기", id: AppWindow.edit.rawValue) {
             EditView().environmentObject(state)
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
 
         Window("배치 관리", id: AppWindow.manage.rawValue) {
             ManageView().environmentObject(state)
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
 
         Window("불러오기 결과", id: AppWindow.result.rawValue) {
             ResultView().environmentObject(state)
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
 
         Window("제자리 설정 점검", id: AppWindow.settings.rawValue) {
             SettingsView().environmentObject(state)
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)  // 메뉴바 앱: 실행할 때 창을 자동으로 열지 않는다
     }
 }
 

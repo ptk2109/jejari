@@ -39,7 +39,7 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(width: 520)
-        .onReceive(timer) { _ in state.checks = SettingsCheck.items() }
+        .onReceive(timer) { _ in state.refreshChecks() }
     }
 
     private func apply(_ item: CheckItem) {
@@ -49,6 +49,6 @@ struct SettingsView: View {
 
     /// 단축키·Dock 설정은 반영까지 1~2초 걸린다 (0단계)
     private func refreshSoon() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { state.checks = SettingsCheck.items() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { state.refreshChecks() }
     }
 }

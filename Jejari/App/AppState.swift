@@ -51,14 +51,38 @@ final class AppState: ObservableObject {
         reload()
     }
 
+    /// 값이 실제로 바뀔 때만 갱신한다. 메뉴바 메뉴는 상태가 바뀔 때마다 다시 그려져서 열린 하위 메뉴가 닫히기 때문
     func reload() {
-        snapshots = SnapshotStore.all()
-        checks = SettingsCheck.items()
+        let loaded = SnapshotStore.all()
+        if loaded.map({ "\($0.name)|\($0.createdAt)|\($0.includedWindows.count)" }) != snapshots.map({ "\($0.name)|\($0.createdAt)|\($0.includedWindows.count)" }) {
+            snapshots = loaded
+        }
+        refreshChecks()
     }
 
+    func refreshChecks() {
+        let items = SettingsCheck.items()
+        if items != checks { checks = items }
+    }
+
+    /// 창 제목 (SwiftUI Window 장면과 같게)
+    private static let windowTitles: [AppWindow: String] = [
+        .save: "배치 저장", .edit: "배치 창 고르기", .manage: "배치 관리", .result: "불러오기 결과", .settings: "제자리 설정 점검",
+    ]
+
+    /// 창을 열고 지금 보고 있는 가상화면의 맨 앞으로 가져온다.
+    /// Dock 아이콘 없는 메뉴바 앱은 스스로 앞으로 나오기 어렵고, 창이 처음 열린 다른 가상화면에 남아 있을 수 있다
     func open(_ window: AppWindow) {
         openWindowAction?(id: window.rawValue)
-        NSApp.activate()
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            guard let title = Self.windowTitles[window] else { return }
+            for nsWindow in NSApp.windows where nsWindow.title == title {
+                nsWindow.collectionBehavior.insert(.moveToActiveSpace)
+                nsWindow.makeKeyAndOrderFront(nil)
+                nsWindow.orderFrontRegardless()
+            }
+        }
     }
 
     // MARK: 외부 명령

@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 
 /// 설정 점검 항목 하나 (기획서 13장)
-struct CheckItem: Identifiable {
+struct CheckItem: Identifiable, Equatable {
     enum Action { case openSettings, fix, none }
     let id: String
     let title: String
