@@ -4,7 +4,15 @@ import AppKit
 enum OtherAppsService {
     /// 항상 건드리지 않을 앱 (기획서 12.6 제외 목록). 화면은 아직 없고 UserDefaults "alwaysKeepApps"
     static var alwaysKeep: Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: "alwaysKeepApps") ?? [])
+        get { Set(UserDefaults.standard.stringArray(forKey: "alwaysKeepApps") ?? []) }
+        set { UserDefaults.standard.set(newValue.sorted(), forKey: "alwaysKeepApps") }
+    }
+
+    /// bundle ID로 앱 이름 (실행 중이 아니면 설치된 앱에서 찾는다)
+    static func appName(_ bundleId: String) -> String {
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first, let name = app.localizedName { return name }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) { return FileManager.default.displayName(atPath: url.path) }
+        return bundleId
     }
 
     /// 스냅샷에 없는 실행 중인 일반 앱. 제자리 자신과 제외 목록은 뺀다

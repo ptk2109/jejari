@@ -26,6 +26,8 @@ struct SettingsView: View {
                 }
             }
             Divider()
+            KeepAppsView()
+            Divider()
             HStack {
                 Text("시스템 설정이 열려 있으면 다시 열어야 바뀐 값이 보입니다.")
                     .font(.caption).foregroundStyle(.secondary)
