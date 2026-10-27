@@ -278,9 +278,13 @@ final class Restorer: @unchecked Sendable {
         var reopened = Set<String>()                    // 다시 열기를 요청한 앱
         var chromeOpened = Set<Int>(), projectOpened = Set<Int>()   // 열어 달라고 한 저장 창
         var placedIndexes = Set<Int>()
-        var lastProjectOpen: (index: Int, at: Date)?
+        var lastProjectOpen: [String: (index: Int, at: Date)] = [:]   // 앱마다 마지막으로 연 JetBrains 프로젝트
+        var lastRequest: [String: Date] = [:]           // 앱마다 마지막으로 창을 열어 달라고 한 시각
         var lastProgress = Date()
     }
+
+    /// 창을 열어 달라고 한 뒤 그 앱을 포기하기 전에 기다리는 시간. 느린 앱(Xcode, DataGrip)은 창이 뜨는 데 15초 넘게 걸린다
+    private static let requestGrace: TimeInterval = 30
 
     /// 앱마다 따로 보면서 뜬 창부터 배치한다. 한 앱이 늦거나 입력을 기다려도 다른 앱을 막지 않는다 (기획서 12.2 #5, #20)
     private func placeWindows(_ windows: [SavedWindow]) {
@@ -319,10 +323,6 @@ final class Restorer: @unchecked Sendable {
             scan.responding = scan.responding && one.responding
         }
         if scan.responding { state.unresponsive.remove(bundleId) } else { state.unresponsive.insert(bundleId) }
-        if scan.blockers.isEmpty { state.blocked[bundleId] = nil } else {
-            if state.blocked[bundleId] == nil { progress("\(appName): 입력 대기 → 뒤로 미룸") }
-            state.blocked[bundleId] = scan.blockers
-        }
         let live = scan.windows.filter { !state.used.contains($0.windowID) }
         // 약한 단서(제목 다름 등)는 앱이 안정된 뒤에: 원래 떠 있던 앱이거나, 띄운 지 5초가 지나고 창 수가 4초 동안 그대로일 때
         if state.countSince[bundleId]?.count != live.count { state.countSince[bundleId] = (live.count, Date()) }
@@ -345,21 +345,25 @@ final class Restorer: @unchecked Sendable {
         let strayBlockers = live.filter { scan.maybeBlockers.contains($0.windowID) && !pairedIDs.contains($0.windowID) }
         if !left.isEmpty && !strayBlockers.isEmpty {
             blockers += strayBlockers.map { "\($0.title) (\(Int($0.frame.width))x\(Int($0.frame.height)))" }
+        }
+        // 입력 대기는 여기서 한 번에 정한다. 처음 대기에 들어갈 때만 알린다
+        if blockers.isEmpty { state.blocked[bundleId] = nil } else {
             if state.blocked[bundleId] == nil { progress("\(appName): 입력 대기 → 뒤로 미룸") }
             state.blocked[bundleId] = blockers
         }
         guard mode == .full, !left.isEmpty else { return left }
 
-        // 앱이 자리 잡았는데(창 수 15초 그대로, 띄운 지 20초 이상) 입력 대기도 아니고 할 수 있는 요청도 다 했으면 그 앱은 그만 기다린다
+        // 앱이 자리 잡았는데(창 수 15초 그대로, 띄운 지 20초 이상, 마지막 요청 뒤 30초 이상) 입력 대기도 아니고
+        // 할 수 있는 요청도 다 했으면 그 앱은 그만 기다린다
         let settled = Date().timeIntervalSince(countStableSince) > 15
             && Date().timeIntervalSince(launchedAt[bundleId] ?? .distantPast) > 20
+            && Date().timeIntervalSince(state.lastRequest[bundleId] ?? .distantPast) > Self.requestGrace
         let isJetBrains = JetBrainsService.isJetBrains(bundleId)
         let hasDocuments = left.contains { windows[$0].filePath != nil }
         let triedAll = (state.reopened.contains(bundleId) || !live.isEmpty || bundleId == BrowserService.chrome || isJetBrains || hasDocuments)
             && left.allSatisfy { state.chromeOpened.contains($0) || windows[$0].tabURLs.isEmpty }
             && left.allSatisfy { windows[$0].filePath.map(openedDocuments.contains) ?? true }
             && left.allSatisfy { state.projectOpened.contains($0) || !WindowMatcher.isProjectTitle(windows[$0]) }
-            && Date().timeIntervalSince(state.lastProjectOpen?.at ?? .distantPast) > 15
         if settled, triedAll, blockers.isEmpty, scan.responding {
             report.missing += left.map { "\(windows[$0].appName) \"\(windows[$0].title)\" (앱을 실행했지만 이 창이 열리지 않음)" }
             return []
@@ -377,6 +381,7 @@ final class Restorer: @unchecked Sendable {
         let documents = Set(left.compactMap { windows[$0].filePath }).subtracting(openedDocuments)
         if !isJetBrains, !waitingInput, stable, responding, !documents.isEmpty, let appPath = app.bundleURL?.path {
             openedDocuments.formUnion(documents)
+            state.lastRequest[bundleId] = Date()
             progress("\(windows[left[0]].appName) 문서 열기: \(documents.map { ($0 as NSString).lastPathComponent }.sorted().joined(separator: ", "))")
             ExternalCommand.openInBackground(app: appPath, documents.sorted())
         }
@@ -384,17 +389,20 @@ final class Restorer: @unchecked Sendable {
         if !hasWindows, !waitingInput, stable, !state.reopened.contains(bundleId), bundleId != BrowserService.chrome, !isJetBrains,
            !left.contains(where: { windows[$0].filePath != nil }), let path = app.bundleURL?.path {
             state.reopened.insert(bundleId)
+            state.lastRequest[bundleId] = Date()
             progress("\(windows[left[0]].appName): 창이 없어 다시 열기 요청")
             reopen(path)
         }
         // JetBrains: 없는 프로젝트 창을 최근 프로젝트 목록에서 찾아 하나씩 연다. 앞서 연 창이 뜨거나 15초가 지나야 다음 것
-        let previousDone = state.lastProjectOpen.map { state.placedIndexes.contains($0.index) || Date().timeIntervalSince($0.at) > 15 } ?? true
+        // 한꺼번에 보내면 하나만 열린 적이 있어 앱마다 하나씩. 다른 JetBrains 앱은 기다리지 않는다
+        let previousDone = state.lastProjectOpen[bundleId].map { state.placedIndexes.contains($0.index) || Date().timeIntervalSince($0.at) > 15 } ?? true
         if isJetBrains, !waitingInput, responding, previousDone,
            let i = left.first(where: { WindowMatcher.isProjectTitle(windows[$0]) && !state.projectOpened.contains($0) }) {
             state.projectOpened.insert(i)
             let project = WindowMatcher.titleKey(windows[i].title)
             if let path = JetBrainsService.projectPath(appName: windows[i].appName, project: project), let appPath = app.bundleURL?.path {
-                state.lastProjectOpen = (i, Date())
+                state.lastProjectOpen[bundleId] = (i, Date())
+                state.lastRequest[bundleId] = Date()
                 progress("\(windows[i].appName) 프로젝트 열기: \(project)")
                 JetBrainsService.open(project: path, appPath: appPath)
             } else {
@@ -407,6 +415,7 @@ final class Restorer: @unchecked Sendable {
                 let urls = windows[i].tabURLs
                 guard !urls.isEmpty else { continue }
                 state.chromeOpened.insert(i)
+                state.lastRequest[bundleId] = Date()
                 progress("Chrome 창 열기: \(urls[0]) 외 \(urls.count - 1)개")
                 BrowserService.openChromeWindow(urls)
             }
