@@ -147,9 +147,11 @@ final class Restorer: @unchecked Sendable {
         func remap(_ i: Int, from missing: SavedDisplay, to target: LiveDisplay) {
             let f = windows[i].frame
             let sx = target.frame.width / missing.frame.width, sy = target.frame.height / missing.frame.height
-            windows[i].frame = CGRect(x: target.frame.minX + (f.minX - missing.frame.minX) * sx,
-                                      y: target.frame.minY + (f.minY - missing.frame.minY) * sy,
-                                      width: f.width * sx, height: f.height * sy)
+            let scaled = CGRect(x: target.frame.minX + (f.minX - missing.frame.minX) * sx,
+                                y: target.frame.minY + (f.minY - missing.frame.minY) * sy,
+                                width: f.width * sx, height: f.height * sy)
+            // 비율로 줄이면 메뉴바 영역(y < 메뉴바 아래)에 걸리는 창이 생긴다 → 쓸 수 있는 영역 안으로
+            windows[i].frame = DisplayService.clamp(scaled, to: target.uuid)
             windows[i].displayUuid = target.uuid
         }
         for missing in snapshot.displays where displays[missing.uuid] == nil {
