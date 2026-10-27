@@ -298,26 +298,8 @@ final class AppState: ObservableObject {
         reload()
     }
 
-    func setOtherApps(_ name: String, _ policy: OtherAppsPolicy) {
-        guard var snapshot = try? SnapshotStore.load(name) else { return }
-        snapshot.otherAppsPolicy = policy
-        try? SnapshotStore.save(snapshot)
-        reload()
-    }
 
-    func setSpaceStrategy(_ name: String, _ strategy: SpaceStrategy) {
-        guard var snapshot = try? SnapshotStore.load(name) else { return }
-        snapshot.spaceStrategy = strategy == .auto ? nil : strategy
-        try? SnapshotStore.save(snapshot)
-        reload()
-    }
 
-    func setTidySpaces(_ name: String, _ on: Bool) {
-        guard var snapshot = try? SnapshotStore.load(name) else { return }
-        snapshot.tidySpaces = on ? true : nil
-        try? SnapshotStore.save(snapshot)
-        reload()
-    }
 
     func delete(_ name: String) {
         try? SnapshotStore.delete(name)
