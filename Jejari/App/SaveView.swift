@@ -18,6 +18,7 @@ struct SaveView: View {
                     if state.snapshotNames.contains(state.draftName.trimmingCharacters(in: .whitespaces)) {
                         Text("같은 이름의 배치를 덮어씁니다.").font(.caption).foregroundStyle(.orange)
                     }
+                    OtherAppsPicker(policy: Binding(get: { state.draft?.otherAppsPolicy ?? .keep }, set: { state.draft?.otherAppsPolicy = $0 }))
                     WindowChecklist(snapshot: Binding(get: { state.draft ?? draft }, set: { state.draft = $0 }))
                         .frame(minHeight: 320)
                     HStack {

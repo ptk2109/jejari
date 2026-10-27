@@ -6,12 +6,14 @@ struct RestoreReport: Codable {
     var alreadyInPlace = 0
     var missing: [String] = []      // 저장된 창과 짝이 없음 (앱이 꺼져 있거나 창이 없음)
     var problems: [String] = []     // 옮겼지만 문제가 있거나 옮길 수 없음
+    var otherApps: [String] = []    // 다른 앱 처리 결과 (숨김, 종료 요청)
 
     var summary: String {
         var parts = ["✅ \(moved.count + alreadyInPlace)개 제자리"]
         if !moved.isEmpty { parts.append("(이동 \(moved.count)개)") }
         if !problems.isEmpty { parts.append("⚠️ \(problems.count)개 문제") }
         if !missing.isEmpty { parts.append("❌ \(missing.count)개 없음") }
+        if !otherApps.isEmpty { parts.append("다른 앱 \(otherApps.count)개 처리") }
         return parts.joined(separator: " · ")
     }
 }
@@ -58,6 +60,15 @@ final class Restorer: @unchecked Sendable {
         }
         if !dryRun { addMissingSpaces(extraSpaces) }
         chooseSpaceLookup(extraSpaces)
+        if mode == .full && !dryRun {
+            // 다른 앱 처리를 먼저 해서 배치할 때 화면이 덜 복잡하게
+            let policy = snapshot.otherAppsPolicy
+            let handled = OtherAppsService.apply(policy, for: snapshot)
+            if !handled.isEmpty { progress("다른 앱 \(policy.title): \(handled.joined(separator: ", "))") }
+            if policy != .keep { report.otherApps = handled.map { "\($0) (\(policy.title))" } }
+            let shown = OtherAppsService.unhideIncluded(snapshot)
+            if !shown.isEmpty { progress("숨겨져 있던 앱을 다시 보이게 함: \(shown.joined(separator: ", "))") }
+        }
         if mode == .full { launchApps() }
         // 모니터가 1대이고 여러 Space에 걸친 배치면 임시 모니터를 처음에 만든다.
         // 만들 때 macOS가 화면보다 큰 창을 줄이는 등 창을 흔들기 때문에, 배치하기 전에 끝나게 한다

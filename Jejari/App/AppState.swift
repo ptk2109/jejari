@@ -252,6 +252,14 @@ final class AppState: ObservableObject {
         return copyName
     }
 
+    /// 다른 앱 처리 바꾸기
+    func setOtherApps(_ name: String, _ policy: OtherAppsPolicy) {
+        guard var snapshot = try? SnapshotStore.load(name) else { return }
+        snapshot.otherAppsPolicy = policy
+        try? SnapshotStore.save(snapshot)
+        reload()
+    }
+
     func delete(_ name: String) {
         try? SnapshotStore.delete(name)
         reload()
@@ -268,6 +276,31 @@ final class AppState: ObservableObject {
             if quiet { writeResult(ActionResult(action: verifyOnly ? "verify" : "restore", name: name, finishedAt: Date(), ok: false, summary: status)) }
             return
         }
+        // 종료 요청 배치는 불러오기 전에 목록을 보여 주고 확인한다 (외부 명령은 확인 없이)
+        if mode == .full && !verifyOnly && !quiet && snapshot.otherAppsPolicy == .quit {
+            let targets = OtherAppsService.quitTargets(for: snapshot).compactMap(\.localizedName)
+            if !targets.isEmpty {
+                let alert = NSAlert()
+                alert.messageText = "다른 앱 \(targets.count)개에 종료를 요청합니다"
+                alert.informativeText = targets.joined(separator: ", ") + "\n\n저장하지 않은 문서가 있으면 각 앱이 저장할지 묻습니다."
+                alert.addButton(withTitle: "종료하고 불러오기")
+                alert.addButton(withTitle: "종료 없이 불러오기")
+                alert.addButton(withTitle: "취소")
+                NSApp.activate(ignoringOtherApps: true)
+                switch alert.runModal() {
+                case .alertFirstButtonReturn: break
+                case .alertSecondButtonReturn:
+                    var keep = snapshot
+                    keep.otherAppsPolicy = .keep
+                    return restoreLoaded(keep, name: name, mode: mode, isUndo: isUndo, quiet: quiet, verifyOnly: verifyOnly)
+                default: return
+                }
+            }
+        }
+        restoreLoaded(snapshot, name: name, mode: mode, isUndo: isUndo, quiet: quiet, verifyOnly: verifyOnly)
+    }
+
+    private func restoreLoaded(_ snapshot: Snapshot, name: String, mode: RestoreMode, isUndo: Bool, quiet: Bool, verifyOnly: Bool) {
         busy = true
         status = verifyOnly ? "\"\(name)\" 검증 중…" : "\"\(name)\" 불러오는 중… 키보드와 마우스에서 손을 떼 주세요"
         Task.detached {
