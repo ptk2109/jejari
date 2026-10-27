@@ -138,7 +138,9 @@ final class Restorer: @unchecked Sendable {
             // ① 배치만 모드는 앱이 이미 떠 있으므로 약한 단서도 바로 배정한다
             let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, allowWeak: true)
             let matched = Set(pairs.map(\.savedIndex))
-            report.missing += indexes.filter { !matched.contains($0) }.map { "\(name) \"\(windows[$0].title)\"" }
+            // 이유를 구분해서 보고: 앱은 켜져 있지만 창이 없음 / 창은 있는데 저장한 창과 맞는 것이 없음
+            let reason = live.isEmpty ? "앱은 켜져 있지만 열린 창이 없음" : "맞는 창을 찾지 못함"
+            report.missing += indexes.filter { !matched.contains($0) }.map { "\(name) \"\(windows[$0].title)\" (\(reason))" }
             for pair in pairs { place(windows[pair.savedIndex], pair.live) }
         }
     }
