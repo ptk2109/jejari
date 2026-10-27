@@ -8,6 +8,9 @@ struct ManageView: View {
     @State private var newName = ""
     @State private var renameError: String?
     @State private var deleting: String?
+    /// 여러 개 지우기용 체크 (행을 고르는 selection과 따로)
+    @State private var checked = Set<String>()
+    @State private var deletingChecked = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -18,13 +21,24 @@ struct ManageView: View {
                         ContentUnavailableView("저장된 배치 없음", systemImage: "rectangle.3.group",
                                                description: Text("메뉴의 \"현재 배치 저장…\"으로 지금 배치를 저장하세요."))
                     } else {
-                        List(state.snapshots, selection: $selection) { snapshot in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(snapshot.name).font(.headline)
-                                Text(detail(snapshot)).font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle(isOn: Binding(get: { !state.snapshots.isEmpty && checked.count == state.snapshots.count },
+                                                 set: { checked = $0 ? Set(state.snapshots.map(\.name)) : [] })) {
+                                Text(checked.isEmpty ? "모두 선택" : "\(checked.count)개 체크됨").font(.callout)
                             }
-                            .tag(snapshot.name)
-                            .contextMenu { actions(for: snapshot.name) }
+                            List(state.snapshots, selection: $selection) { snapshot in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Toggle("", isOn: Binding(get: { checked.contains(snapshot.name) },
+                                                             set: { if $0 { checked.insert(snapshot.name) } else { checked.remove(snapshot.name) } }))
+                                        .labelsHidden()
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(snapshot.name).font(.headline)
+                                        Text(detail(snapshot)).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .tag(snapshot.name)
+                                .contextMenu { actions(for: snapshot.name) }
+                            }
                         }
                     }
                 }
@@ -56,6 +70,9 @@ struct ManageView: View {
                     .disabled(selection == nil)
                 Button("삭제", role: .destructive) { deleting = selection }
                     .disabled(selection == nil)
+                Divider().frame(height: 16)
+                Button("체크한 \(checked.count)개 삭제", role: .destructive) { deletingChecked = true }
+                    .disabled(checked.isEmpty)
                 Spacer()
                 Button("폴더 열기") {
                     try? FileManager.default.createDirectory(at: SnapshotStore.directory, withIntermediateDirectories: true)
@@ -77,6 +94,17 @@ struct ManageView: View {
         .alert(renameError ?? "", isPresented: Binding(get: { renameError != nil }, set: { if !$0 { renameError = nil } })) {
             Button("확인") { renameError = nil }
         }
+        .alert("체크한 배치 \(checked.count)개를 삭제할까요?", isPresented: $deletingChecked) {
+            Button("삭제", role: .destructive) {
+                for name in checked { state.delete(name) }
+                if let selection, checked.contains(selection) { self.selection = nil }
+                checked = []
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text(checked.sorted().joined(separator: "\n") + "\n\n삭제한 배치는 되돌릴 수 없어요.")
+        }
+        .onChange(of: state.snapshotNames) { _, names in checked.formIntersection(names) }
         .confirmationDialog("\"\(deleting ?? "")\"을(를) 삭제할까요?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("삭제", role: .destructive) {
                 if let deleting { state.delete(deleting); selection = nil }
