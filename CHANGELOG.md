@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
+첫 배포판. 이제 Releases에서 받아 설치하고, 새 버전은 앱이 알려 준다.
+
 ### 추가
 
 - 설정 창 하나로 통합(일반 / 권한과 macOS 설정 / 항상 건드리지 않을 앱), 항목마다 쉬운 설명과 예시
@@ -41,5 +45,6 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ptk2109/jejari/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ptk2109/jejari/releases/tag/v0.1.0
