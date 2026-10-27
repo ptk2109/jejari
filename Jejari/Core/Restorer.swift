@@ -44,6 +44,8 @@ final class Restorer: @unchecked Sendable {
     private var usedSpaces: [String: Set<Int>] = [:]
     /// 가상화면 초기화 후 다시 만들기 (② 전체 복원에서만)
     private var resetSpaces = false
+    /// 짝지어진 창 (저장 창 인덱스 → 지금 창). 겹친 순서를 맞출 때 쓴다
+    private var matchedLive: [Int: LiveWindow] = [:]
 
     // MARK: 가상화면 초기화
 
@@ -127,6 +129,7 @@ final class Restorer: @unchecked Sendable {
             usleep(500_000)
             fixFramesAfterBridge(windows)
         }
+        if !dryRun { restoreStacking(windows) }
         if !dryRun { returnToSavedSpaces() }
         return report
     }
@@ -296,6 +299,7 @@ final class Restorer: @unchecked Sendable {
                     || (Date().timeIntervalSince(launchedAt[bundleId]!) > 5 && Date().timeIntervalSince(countSince[bundleId]!.since) > 4)
                 let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, allowWeak: stable)
                 for pair in pairs {
+                    matchedLive[pair.savedIndex] = pair.live
                     placedIndexes.insert(pair.savedIndex)
                     used.insert(pair.live.windowID)
                     place(windows[pair.savedIndex], pair.live)
@@ -560,6 +564,35 @@ final class Restorer: @unchecked Sendable {
                     report.problems.append("\(saved.appName) \"\(saved.title.prefix(30))\": 크기 \(Int(frame.width))x\(Int(frame.height)) (앱이 크기를 제한함)")
                 }
             }
+        }
+    }
+
+    // MARK: 겹친 순서
+
+    /// 가상화면마다 저장된 창끼리 겹치는 곳만, 뒤 창부터 앞 창 순서로 앞으로 올린다.
+    /// 다른 앱 창을 올리려면 그 앱을 앞으로 가져와야 해서 화면이 잠깐 바뀐다
+    private func restoreStacking(_ windows: [SavedWindow]) {
+        let items = matchedLive.compactMap { index, live -> (saved: SavedWindow, live: LiveWindow, order: Int)? in
+            guard let order = windows[index].stackOrder, !windows[index].minimized else { return nil }
+            return (windows[index], live, order)
+        }
+        let groups = Dictionary(grouping: items) { "\($0.saved.displayUuid)#\(targetIndex($0.saved))" }
+        var adjusted = 0
+        for (_, group) in groups where group.count > 1 {
+            // 실제로 겹치는 창이 있는 묶음만
+            let overlapping = group.contains { a in group.contains { b in a.live.windowID != b.live.windowID && a.saved.frame.intersects(b.saved.frame) } }
+            guard overlapping, let display = group.first?.saved.displayUuid else { continue }
+            _ = SpaceService.switchTo(display: display, index: targetIndex(group[0].saved))
+            for item in group.sorted(by: { $0.order > $1.order }) {   // 뒤 창부터
+                AX.setBool(AXUIElementCreateApplication(item.live.pid), kAXFrontmostAttribute, true)
+                AXUIElementPerformAction(item.live.element, kAXRaiseAction as CFString)
+                usleep(120_000)
+            }
+            adjusted += 1
+        }
+        if adjusted > 0 {
+            report.spaces.append("겹친 창 순서를 맞춘 가상화면 \(adjusted)개")
+            progress("겹친 창 순서 맞춤: 가상화면 \(adjusted)개")
         }
     }
 

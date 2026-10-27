@@ -120,6 +120,8 @@ struct SavedWindow: Codable {
     var fullScreen: Bool
     /// 브라우저 창의 탭 URL (Chrome, AppleScript로 읽음). 다른 앱은 nil
     var urls: [String]? = nil
+    /// 겹친 순서. 작을수록 앞 (저장할 때 창 목록 순서). 예전 파일은 nil
+    var stackOrder: Int? = nil
     /// 사용자가 뺀 창. 지우지 않고 표시만 해서 나중에 다시 포함할 수 있게 한다. nil이면 포함 (예전 파일과 호환)
     var excluded: Bool? = nil
 

@@ -81,6 +81,10 @@ enum WindowService {
         var apps: [SavedApp] = []
         var windows: [SavedWindow] = []
         let chromeTabs = BrowserService.chromeWindows()
+        // 창 목록은 앞 창부터 뒤 창 순서 (모든 Space 포함)
+        let stack = Dictionary((CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? [])
+            .enumerated().compactMap { item in (item.element[kCGWindowNumber as String] as? CGWindowID).map { ($0, item.offset) } },
+            uniquingKeysWith: { first, _ in first })
         for app in regularApps() {
             let bundleId = app.bundleIdentifier ?? ""
             apps.append(SavedApp(bundleId: bundleId, name: app.localizedName ?? bundleId, path: app.bundleURL?.path ?? ""))
@@ -93,7 +97,8 @@ enum WindowService {
                     displayUuid: location.display, spaceIndex: location.index, spaceUuid: display.uuids[location.index - 1],
                     minimized: (AX.attribute(window.element, kAXMinimizedAttribute) as Bool?) ?? false,
                     fullScreen: (AX.attribute(window.element, "AXFullScreen") as Bool?) ?? false,
-                    urls: bundleId == BrowserService.chrome ? BrowserService.urls(for: window.frame, in: chromeTabs) : nil))
+                    urls: bundleId == BrowserService.chrome ? BrowserService.urls(for: window.frame, in: chromeTabs) : nil,
+                    stackOrder: stack[window.windowID]))
             }
         }
         return Snapshot(
