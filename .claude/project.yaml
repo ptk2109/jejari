@@ -1,0 +1,9 @@
+# 프로젝트 manifest (스키마 초안, 확정 전)
+name: jejari
+type: app
+stack: [swift, swiftui, appkit]
+platform: macos-15+
+repo: ""        # GitHub 생성 후 입력
+commands:
+  build: ""     # Xcode 프로젝트 생성 후 입력
+  test: ""
