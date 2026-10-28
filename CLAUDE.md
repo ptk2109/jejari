@@ -12,7 +12,7 @@ macOS 메뉴바 앱. 열린 창의 배치를 스냅샷으로 저장하고 한 �
 ## 지킬 것
 
 - 사용자가 알아챌 변경은 같은 커밋에서 `CHANGELOG.md`의 `[Unreleased]`에 적는다 (규칙: `docs/개발.md` 변경 기록)
-- `main`에 직접 커밋하지 않는다. 작업 브랜치에서 커밋하고 PR로 합친다
+- `main`에 직접 커밋하지 않는다. 작업마다 `origin/main`에서 브랜치를 만들고 PR을 Squash로 합친 뒤 지운다. 브랜치 이름, 커밋 메시지(`타입: 설명`), 순서는 hub의 `vault/30_knowledge/git-브랜치-규칙.md`(`.lab/../../30_knowledge/`)
 - 동작을 바꾸면 `docs/구조.md`의 해당 절도 같이 고친다
 - 화면을 볼 수 없으니 동작 확인은 `jejari://` URL 명령과 불러오기 기록으로 한다 (`docs/개발.md` 시험)
 - 작업을 마치면 hub의 `vault/30_knowledge/버전-내기-기준.md`(`.lab/../../30_knowledge/`)를 보고, 맞으면 버전 내기(`/lab:release`)를 제안한다
