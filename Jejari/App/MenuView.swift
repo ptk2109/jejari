@@ -44,7 +44,7 @@ struct MenuView: View {
 
         Divider()
 
-        Button(state.needsAttention ? "⚠️ 설정… (확인 필요)" : "⚙️ 설정…") {
+        Button(state.attentionTitle.map { "⚠️ \($0)을 켜 주세요…" } ?? "⚙️ 설정…") {
             state.reload()
             state.open(.settings)
         }
