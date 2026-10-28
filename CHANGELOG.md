@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-28
+
 ### 수정
 
 - 시스템 설정에서 손쉬운 사용 권한을 켜도 메뉴바 아이콘이 ⚠️로 남던 문제. 이제 몇 초 안에 바뀐다
@@ -96,7 +98,8 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/ptk2109/jejari/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/ptk2109/jejari/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ptk2109/jejari/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ptk2109/jejari/compare/v0.3.0...v0.4.0
