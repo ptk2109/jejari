@@ -40,7 +40,17 @@ final class AppState: ObservableObject {
 
     private init() {
         reload()
+        // 꼭 필요한 권한이 꺼져 있는 동안 2초마다 다시 본다. 시스템 설정에서 켜면 메뉴바 아이콘이 바로 돌아온다
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+            Task { @MainActor in
+                let state = AppState.shared
+                if state.needsAttention { state.refreshChecks() }
+            }
+        }
     }
+
+    /// 메뉴에 보일 할 일. 꼭 필요한데 안 된 항목의 이름
+    var attentionTitle: String? { checks.first { !$0.ok && $0.required }?.title }
 
     /// 값이 실제로 바뀔 때만 갱신한다. 메뉴바 메뉴는 상태가 바뀔 때마다 다시 그려져서 열린 하위 메뉴가 닫히기 때문
     func reload() {
