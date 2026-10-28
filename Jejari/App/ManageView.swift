@@ -69,7 +69,7 @@ struct ManageView: View {
                             .labelsHidden()
                         VStack(alignment: .leading, spacing: 2) {
                             Text(snapshot.name).font(.headline)
-                            Text(snapshot.createdAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                            Text(snapshot.createdAt.listStamp).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     .tag(snapshot.name)
@@ -194,9 +194,21 @@ struct ManageView: View {
     }
 
     private func summary(_ snapshot: Snapshot) -> String {
-        let date = snapshot.createdAt.formatted(date: .abbreviated, time: .shortened)
+        let date = snapshot.createdAt.listStamp
         let spaces = snapshot.spaces.reduce(0) { $0 + $1.spaces.count }
         let windows = snapshot.includedWindows.count == snapshot.windows.count ? "\(snapshot.windows.count)" : "\(snapshot.includedWindows.count)/\(snapshot.windows.count)"
         return "\(date) 저장 · 창 \(windows)개 · 모니터 \(snapshot.displays.count)대 · 가상화면 \(spaces)개"
     }
+}
+
+extension Date {
+    /// 배치 목록에 보일 저장 시각: 2026-10-28 09:19 (언어 설정과 상관없이 같은 모양, 24시간)
+    var listStamp: String { Self.listStampFormatter.string(from: self) }
+
+    private static let listStampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
 }
