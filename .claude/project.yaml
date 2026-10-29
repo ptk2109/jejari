@@ -2,6 +2,7 @@
 name: jejari
 type: app
 stage: building
+release: tag   # 착지 뒤 태그 + 배포판(GitHub Release, Sparkle 피드)
 version: 0.6.0
 stack: [swift, swiftui, appkit]
 platform: macos-15+
@@ -16,4 +17,4 @@ commands:
 docs:
   changelog: CHANGELOG.md
   structure: docs/구조.md
-  development: docs/개발.md   # 버전·변경 기록·버전 내기 절차의 본체
+  development: docs/개발.md   # 버전·변경 기록 형식·버전 내기 절차의 본체 (브랜치·언제 내는지는 hub 공통 규칙)
