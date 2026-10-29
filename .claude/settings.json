@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(git tag -a v*)",
+      "Bash(git push origin v*)",
+      "Bash(xcodegen generate)",
+      "Bash(xcodebuild:*)",
+      "Bash(scripts/release.sh:*)"
+    ]
+  }
+}
