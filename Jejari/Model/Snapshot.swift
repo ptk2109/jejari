@@ -97,6 +97,9 @@ struct SavedApp: Codable {
     var path: String
     /// 사용자가 뺀 앱. nil이면 포함 (예전 파일과 호환)
     var excluded: Bool? = nil
+    /// 저장할 때의 프로세스. 그 프로세스가 아직 떠 있으면 창 번호가 그대로라 번호로 짝짓는다. 예전 파일은 nil
+    var pid: Int32? = nil
+    var launchedAt: Date? = nil
 
     var isIncluded: Bool {
         get { excluded != true }
@@ -124,6 +127,8 @@ struct SavedWindow: Codable {
     var stackOrder: Int? = nil
     /// 사용자가 뺀 창. 지우지 않고 표시만 해서 나중에 다시 포함할 수 있게 한다. nil이면 포함 (예전 파일과 호환)
     var excluded: Bool? = nil
+    /// 저장할 때의 창 번호. 앱을 끄기 전까지 바뀌지 않는다 (SavedApp의 프로세스와 같이 씀). 예전 파일은 nil
+    var windowID: CGWindowID? = nil
 
     var isIncluded: Bool {
         get { excluded != true }

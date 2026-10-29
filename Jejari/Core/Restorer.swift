@@ -46,6 +46,8 @@ final class Restorer: @unchecked Sendable {
     private var resetSpaces = false
     /// 짝지어진 창 (저장 창 인덱스 → 지금 창). 겹친 순서를 맞출 때 쓴다
     private var matchedLive: [Int: LiveWindow] = [:]
+    /// 창 번호로 짝지은 수, 단서 점수로 짝지은 수
+    private var pairedByID = 0, pairedByClues = 0
 
     // MARK: 가상화면 초기화
 
@@ -306,6 +308,7 @@ final class Restorer: @unchecked Sendable {
             sleep(2)
         }
         reportUnplaced(pending, windows, state)
+        if pairedByID > 0 { progress("짝짓기: 창 번호로 \(pairedByID)개, 단서로 \(pairedByClues)개") }
     }
 
     /// 앱 하나를 훑어 짝지은 창을 옮기고, 아직 짝이 없는 저장 창을 돌려준다.
@@ -329,8 +332,13 @@ final class Restorer: @unchecked Sendable {
         let countStableSince = state.countSince[bundleId]!.since
         let stable = mode == .arrange || launchedAt[bundleId] == nil
             || (Date().timeIntervalSince(launchedAt[bundleId]!) > 5 && Date().timeIntervalSince(countStableSince) > 4)
-        let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, allowWeak: stable)
+        // 저장할 때와 같은 프로세스가 떠 있으면 창 번호가 그대로다 (앱을 끄지 않은 ① 배치만, 되돌리기)
+        let byID = snapshot.apps.contains { saved in
+            saved.bundleId == bundleId && apps.contains { WindowMatcher.sameProcess(saved, pid: $0.processIdentifier, launchedAt: WindowService.startTime(of: $0.processIdentifier)) }
+        }
+        let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, id: \.windowID, byID: byID, allowWeak: stable)
         for pair in pairs {
+            if pair.score == WindowMatcher.idScore { pairedByID += 1 } else { pairedByClues += 1 }
             matchedLive[pair.savedIndex] = pair.live
             state.placedIndexes.insert(pair.savedIndex)
             state.used.insert(pair.live.windowID)
@@ -608,7 +616,9 @@ final class Restorer: @unchecked Sendable {
         for (bundleId, indexes) in Dictionary(grouping: windows.indices, by: { windows[$0].bundleId }) {
             var live: [LiveWindow] = []
             for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleId) { live += WindowService.scan(pid: app.processIdentifier).windows }
-            for pair in WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, allowWeak: true) {
+            // 짝은 배치할 때 이미 정했다. 다시 짝지으면 위치가 바뀐 창끼리 엇갈릴 수 있어 그 결과를 쓴다
+            let matched = indexes.compactMap { i in matchedLive[i].flatMap { m in live.first { $0.windowID == m.windowID } }.map { (savedIndex: i, live: $0) } }
+            for pair in matched {
                 let saved = windows[pair.savedIndex], element = pair.live.element
                 guard (AX.attribute(element, kAXMinimizedAttribute) as Bool?) != true else { continue }
                 var frame = AX.frame(element)

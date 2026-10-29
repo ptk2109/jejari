@@ -18,6 +18,15 @@ extension SavedWindow: WindowClues {}
 enum WindowMatcher {
     /// 이 점수 이상이면 바로 배치. 미만(약한 단서만)이면 앱이 안정된 뒤에 배치
     static let strongScore = 40
+    /// 창 번호로 짝지은 점수. 단서 점수로는 나올 수 없는 값
+    static let idScore = 1000
+
+    /// 저장할 때와 같은 프로세스인지. 같으면 그 앱의 창 번호가 그대로다.
+    /// pid는 다시 쓰일 수 있어 실행 시각도 본다 (저장 파일의 시각은 초 단위)
+    static func sameProcess(_ saved: SavedApp, pid: pid_t, launchedAt: Date?) -> Bool {
+        guard let savedPid = saved.pid, let savedLaunch = saved.launchedAt, let launchedAt else { return false }
+        return savedPid == pid && abs(savedLaunch.timeIntervalSince(launchedAt)) < 1
+    }
 
     /// nil = 확실히 다른 창 (다른 파일, 다른 사이트, 다른 JetBrains 프로젝트)
     static func score(saved: SavedWindow, live: some WindowClues) -> Int? {
@@ -68,21 +77,27 @@ enum WindowMatcher {
         bundleId.hasPrefix("com.jetbrains.") && (title.contains(" – ") || title.contains(" ["))
     }
 
-    /// 앱 하나 안에서 점수가 높은 쌍부터 짝짓는다. allowWeak가 false면 약한 단서 쌍은 건너뛴다
-    static func pair(saved: [(index: Int, window: SavedWindow)], live: [LiveWindow], allowWeak: Bool) -> [(savedIndex: Int, live: LiveWindow, score: Int)] {
-        var candidates: [(savedIndex: Int, live: LiveWindow, score: Int)] = []
+    /// 앱 하나 안에서 짝짓는다. byID(저장할 때와 같은 프로세스)면 창 번호가 같은 창을 먼저 확정하고(idScore),
+    /// 나머지는 점수가 높은 쌍부터. allowWeak가 false면 약한 단서 쌍은 건너뛴다
+    static func pair<Live: WindowClues>(saved: [(index: Int, window: SavedWindow)], live: [Live], id: (Live) -> CGWindowID,
+                                        byID: Bool = false, allowWeak: Bool) -> [(savedIndex: Int, liveIndex: Int, live: Live, score: Int)] {
+        var candidates: [(savedIndex: Int, liveIndex: Int, score: Int)] = []
         for item in saved {
-            for window in live {
-                if let score = score(saved: item.window, live: window) { candidates.append((item.index, window, score)) }
+            for (liveIndex, window) in live.enumerated() {
+                if byID, let savedID = item.window.windowID, savedID == id(window) {
+                    candidates.append((item.index, liveIndex, idScore))
+                } else if let score = score(saved: item.window, live: window) {
+                    candidates.append((item.index, liveIndex, score))
+                }
             }
         }
         candidates.sort { $0.score > $1.score }
-        var usedSaved = Set<Int>(), usedLive = Set<CGWindowID>(), result: [(savedIndex: Int, live: LiveWindow, score: Int)] = []
-        for candidate in candidates where !usedSaved.contains(candidate.savedIndex) && !usedLive.contains(candidate.live.windowID) {
+        var usedSaved = Set<Int>(), usedLive = Set<Int>(), result: [(savedIndex: Int, liveIndex: Int, live: Live, score: Int)] = []
+        for candidate in candidates where !usedSaved.contains(candidate.savedIndex) && !usedLive.contains(candidate.liveIndex) {
             guard candidate.score >= strongScore || allowWeak else { continue }
             usedSaved.insert(candidate.savedIndex)
-            usedLive.insert(candidate.live.windowID)
-            result.append(candidate)
+            usedLive.insert(candidate.liveIndex)
+            result.append((candidate.savedIndex, candidate.liveIndex, live[candidate.liveIndex], candidate.score))
         }
         return result
     }
@@ -103,19 +118,16 @@ extension Snapshot {
         for bundleId in Set(old.windows.map(\.bundleId)) {
             let olds = old.windows.indices.filter { old.windows[$0].bundleId == bundleId }
             let news = result.windows.indices.filter { result.windows[$0].bundleId == bundleId }
-            var candidates: [(old: Int, new: Int, score: Int)] = []
-            for o in olds {
-                for n in news {
-                    if let score = WindowMatcher.score(saved: old.windows[o], live: result.windows[n]), score >= WindowMatcher.strongScore {
-                        candidates.append((o, n, score))
-                    }
+            // 앱을 끄지 않고 다시 저장했으면 창 번호로 확실히 짝짓는다
+            let byID = old.apps.contains { saved in
+                saved.bundleId == bundleId && result.apps.contains { new in
+                    new.bundleId == bundleId && new.pid.map { WindowMatcher.sameProcess(saved, pid: $0, launchedAt: new.launchedAt) } == true
                 }
             }
-            var usedOld = Set<Int>(), usedNew = Set<Int>()
-            for candidate in candidates.sorted(by: { $0.score > $1.score }) where !usedOld.contains(candidate.old) && !usedNew.contains(candidate.new) {
-                usedOld.insert(candidate.old)
-                usedNew.insert(candidate.new)
-                result.windows[candidate.new].isIncluded = old.windows[candidate.old].isIncluded
+            let pairs = WindowMatcher.pair(saved: olds.map { ($0, old.windows[$0]) }, live: news.map { result.windows[$0] },
+                                           id: { $0.windowID ?? 0 }, byID: byID, allowWeak: false)
+            for pair in pairs {
+                result.windows[news[pair.liveIndex]].isIncluded = old.windows[pair.savedIndex].isIncluded
             }
         }
         return result

@@ -80,6 +80,16 @@ enum WindowService {
     /// 저장할 때 체크를 꺼 둘 앱. 잠깐 열어 두는 창이라 다시 열면 다른 화면으로 열려 짝이 지어지지 않는다
     static let uncheckedByDefault: Set<String> = ["com.apple.systempreferences"]
 
+    /// 프로세스가 시작된 시각 (커널 기록). NSRunningApplication.launchDate는 macOS가 직접 띄운 앱(Finder 등)에서 비어 있어 이것을 쓴다
+    static func startTime(of pid: pid_t) -> Date? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_starttime
+        return Date(timeIntervalSince1970: TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
+    }
+
     /// 일반 앱(Dock에 아이콘이 있는 앱). 자기 자신은 뺀다
     static func regularApps() -> [NSRunningApplication] {
         NSWorkspace.shared.runningApplications.filter {
@@ -100,7 +110,8 @@ enum WindowService {
             uniquingKeysWith: { first, _ in first })
         for app in regularApps() {
             let bundleId = app.bundleIdentifier ?? ""
-            apps.append(SavedApp(bundleId: bundleId, name: app.localizedName ?? bundleId, path: app.bundleURL?.path ?? ""))
+            apps.append(SavedApp(bundleId: bundleId, name: app.localizedName ?? bundleId, path: app.bundleURL?.path ?? "",
+                                 pid: app.processIdentifier, launchedAt: startTime(of: app.processIdentifier)))
             for window in scan(pid: app.processIdentifier).windows {
                 guard let location = SpaceService.location(of: window.windowID, in: layout),
                       let display = layout.first(where: { $0.displayUuid == location.display }) else { continue }
@@ -112,7 +123,8 @@ enum WindowService {
                     fullScreen: (AX.attribute(window.element, "AXFullScreen") as Bool?) ?? false,
                     urls: bundleId == BrowserService.chrome ? BrowserService.urls(for: window.frame, document: window.document, in: chromeTabs) : nil,
                     stackOrder: stack[window.windowID],
-                    excluded: uncheckedByDefault.contains(bundleId) ? true : nil))
+                    excluded: uncheckedByDefault.contains(bundleId) ? true : nil,
+                    windowID: window.windowID))
             }
         }
         return Snapshot(
