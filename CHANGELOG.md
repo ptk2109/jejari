@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-29
+
 ### 변경
 
 - 앱을 끄지 않았으면 창 번호로 짝지어 ① 배치만과 되돌리기가 제목이 같은 창(터미널 여러 개 등)도 헷갈리지 않는다. 이 버전으로 다시 저장한 배치부터 적용
@@ -105,7 +107,8 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/ptk2109/jejari/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/ptk2109/jejari/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/ptk2109/jejari/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ptk2109/jejari/compare/v0.4.0...v0.5.0
