@@ -26,8 +26,9 @@ enum WindowMatcher {
     static let idScore = 1000
 
 
-    /// nil = 확실히 다른 창 (다른 파일, 다른 사이트, 다른 JetBrains 프로젝트)
-    static func score(saved: SavedWindow, live: some WindowClues) -> Int? {
+    /// nil = 확실히 다른 창 (다른 파일, 다른 사이트, 다른 JetBrains 프로젝트).
+    /// uniqueIdentifier: 그 식별자가 같은 앱 창들 사이에서 하나뿐인지. 모든 창이 같은 식별자를 쓰는 앱은 식별자로 가를 수 없다
+    static func score(saved: SavedWindow, live: some WindowClues, uniqueIdentifier: Bool = true) -> Int? {
         var score = 0
         // 브라우저: 저장한 탭들과 지금 창의 탭들을 비교한다. 같은 주소가 많이 겹칠수록 높게 (같은 사이트 창 여러 개를 가른다).
         // 지금 창의 탭 목록을 못 읽었으면 보고 있는 탭(AXDocument)의 사이트로.
@@ -61,16 +62,38 @@ enum WindowMatcher {
         }
         // 프로젝트 창은 프로젝트 창끼리만, 같은 프로젝트끼리만 (시작 화면이 프로젝트 자리로 가지 않게)
         if isProjectTitle(saved) && (!isProjectTitle(saved.bundleId, live.title) || titleKey(saved.title) != titleKey(live.title)) { return nil }
-        if !saved.identifier.isEmpty && saved.identifier == live.identifier { score += 50 }
+        if uniqueIdentifier && !saved.identifier.isEmpty && saved.identifier == live.identifier { score += 50 }
         if !saved.title.isEmpty && saved.title == live.title {
             score += 60
+        } else if !plainTitle(saved.title).isEmpty && plainTitle(saved.title) == plainTitle(live.title) {
+            score += 50  // 읽지 않은 수 "(3) ", 수정 표시 "● "만 다름
         } else if !titleKey(saved.title).isEmpty && titleKey(saved.title) == titleKey(live.title) {
             score += 40
+        } else if titleWordOverlap(saved.title, live.title) >= 0.5 {
+            score += 20  // 약한 단서: 단어가 절반 이상 겹침
         }
         if abs(saved.frame.width - live.frame.width) < 2 && abs(saved.frame.height - live.frame.height) < 2 { score += 10 }
         if abs(saved.frame.minX - live.frame.minX) < 2 && abs(saved.frame.minY - live.frame.minY) < 2 { score += 10 }
         score += max(0, 3 - abs(saved.order - live.order))
         return score
+    }
+
+    /// 제목 앞의 읽지 않은 수 "(3) "와 수정·알림 표시 "● " "• " "* "를 뗀 것
+    static func plainTitle(_ title: String) -> String {
+        var text = title.trimmingCharacters(in: .whitespaces)
+        while true {
+            if let range = text.range(of: #"^\(\d+\)\s*"#, options: .regularExpression) { text.removeSubrange(range); continue }
+            if let first = text.first, "●•*".contains(first) { text.removeFirst(); text = text.trimmingCharacters(in: .whitespaces); continue }
+            return text
+        }
+    }
+
+    /// 두 제목의 단어가 겹치는 정도 (0~1)
+    static func titleWordOverlap(_ a: String, _ b: String) -> Double {
+        func words(_ s: String) -> Set<String> { Set(plainTitle(s).lowercased().split(whereSeparator: { $0.isWhitespace || "-–—|·:/".contains($0) }).map(String.init)) }
+        let x = words(a), y = words(b)
+        guard !x.isEmpty, !y.isEmpty else { return 0 }
+        return Double(x.intersection(y).count) / Double(x.union(y).count)
     }
 
     /// 제목에서 잘 바뀌지 않는 부분. "프로젝트 – 파일"이면 프로젝트, 경로 표시 " [~/...]"는 뗀다
@@ -93,11 +116,15 @@ enum WindowMatcher {
     static func pair<Live: WindowClues>(saved: [(index: Int, window: SavedWindow)], live: [Live], id: (Live) -> CGWindowID,
                                         allowWeak: Bool) -> [(savedIndex: Int, liveIndex: Int, live: Live, score: Int)] {
         var candidates: [(savedIndex: Int, liveIndex: Int, score: Int)] = []
+        // 식별자가 양쪽에서 하나뿐일 때만 단서로 쓴다
+        let savedIdentifiers = Dictionary(grouping: saved.map(\.window.identifier), by: { $0 }).mapValues(\.count)
+        let liveIdentifiers = Dictionary(grouping: live.map(\.identifier), by: { $0 }).mapValues(\.count)
         for item in saved {
             for (liveIndex, window) in live.enumerated() {
+                let unique = savedIdentifiers[item.window.identifier] == 1 && liveIdentifiers[window.identifier] == 1
                 if let savedID = item.window.windowID, savedID == id(window) {
                     candidates.append((item.index, liveIndex, idScore))
-                } else if let score = score(saved: item.window, live: window) {
+                } else if let score = score(saved: item.window, live: window, uniqueIdentifier: unique) {
                     candidates.append((item.index, liveIndex, score))
                 }
             }
