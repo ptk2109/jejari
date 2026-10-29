@@ -29,7 +29,25 @@ enum WindowService {
     /// 원격 토큰으로 훑는 요소 번호 범위. 실제 창은 대부분 앞쪽 수백 번 안에 있다 (0단계)
     static let elementScanLimit: UInt64 = 3000
 
+    /// pid → (창 번호 → 원격 요소 번호). 창은 살아 있는 동안 같은 요소 번호라, 다음에 훑을 때 그 번호부터 바로 본다
+    nonisolated(unsafe) private static var elementCache: [pid_t: [CGWindowID: UInt64]] = [:]
+    private static let cacheLock = NSLock()
+
+    /// 창 서버가 아는 그 앱의 보통 창(레이어 0) 번호. 모든 가상화면 포함, 권한 없이 읽힌다. 다 찾으면 훑기를 멈추는 기준
+    static func expectedWindowIDs(pid: pid_t) -> Set<CGWindowID> {
+        let list = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
+        return Set(list.compactMap { info -> CGWindowID? in
+            guard info[kCGWindowOwnerPID as String] as? Int32 == pid, info[kCGWindowLayer as String] as? Int == 0,
+                  let id = info[kCGWindowNumber as String] as? CGWindowID,
+                  let bounds = (info[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0) }),
+                  bounds.width >= 100, bounds.height >= 50 else { return nil }
+            return id
+        })
+    }
+
     /// 앱의 모든 Space 창. Space가 없는 창(닫힌 대화상자 잔재 등 유령 창)은 뺀다 (0단계: NateOn "열기" 창 33개)
+    /// 다른 가상화면의 창을 알려 주는 공개 API가 없어 원격 요소 번호를 찔러 본다. 비용을 줄이려고
+    /// 지난번에 찾은 요소 번호를 먼저 보고, 창 서버 목록(expectedWindowIDs)의 창을 다 찾으면 멈춘다
     static func scan(pid: pid_t) -> AppScan {
         var result = AppScan()
         let app = AXUIElementCreateApplication(pid)
@@ -40,12 +58,15 @@ enum WindowService {
             return result
         }
         let layout = SpaceService.layout()
+        let expected = Set(expectedWindowIDs(pid: pid).filter { SpaceService.location(of: $0, in: layout) != nil })
         var seen = Set<CGWindowID>()
-        func consider(_ element: AXUIElement) {
+        var found: [CGWindowID: UInt64] = [:]
+        func consider(_ element: AXUIElement, elementID: UInt64? = nil) {
             AXUIElementSetMessagingTimeout(element, messagingTimeout)
             guard (AX.attribute(element, kAXRoleAttribute) as String?) == kAXWindowRole,
                   let windowID = AX.windowID(element), seen.insert(windowID).inserted,
                   SpaceService.location(of: windowID, in: layout) != nil else { return }
+            if let elementID { found[windowID] = elementID }
             let frame = AX.frame(element)
             guard frame.width >= 100, frame.height >= 50 else { return }
             let subrole: String = AX.attribute(element, kAXSubroleAttribute) ?? ""
@@ -68,10 +89,19 @@ enum WindowService {
                 document: AX.attribute(element, kAXDocumentAttribute) ?? "",
                 order: result.windows.count, frame: frame))
         }
-        // 다른 가상화면의 창까지 원격 요소 번호로 훑는다
-        for elementID in 0..<elementScanLimit {
-            if let element = AX.remoteElement(pid: pid, elementID: elementID) { consider(element) }
+        // 지난번에 찾은 요소 번호부터
+        let cached = cacheLock.withLock { elementCache[pid] ?? [:] }
+        for (windowID, elementID) in cached where expected.contains(windowID) {
+            if let element = AX.remoteElement(pid: pid, elementID: elementID) { consider(element, elementID: elementID) }
         }
+        // 다른 가상화면의 창까지 원격 요소 번호로 훑는다. 창 서버 목록의 창을 다 찾으면 멈춘다
+        if !expected.isSubset(of: seen) {
+            for elementID in 0..<elementScanLimit {
+                if let element = AX.remoteElement(pid: pid, elementID: elementID) { consider(element, elementID: elementID) }
+                if expected.isSubset(of: seen) { break }
+            }
+        }
+        cacheLock.withLock { elementCache[pid] = found }
         // 원격 요소로 창이 안 잡히는 앱이 있어(미리보기) 지금 가상화면의 창은 표준 창 목록으로도 본다
         for element in (AX.attribute(app, kAXWindowsAttribute) as [AXUIElement]?) ?? [] { consider(element) }
         return result
