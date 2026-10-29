@@ -273,6 +273,8 @@ final class Restorer: @unchecked Sendable {
 
     /// 앱을 띄운 시각. 이때부터 몇 초 동안은 창이 덜 떠서 약한 단서 매칭을 미룬다
     private var launchedAt: [String: Date] = [:]
+    /// Chrome을 실행하면서 연 저장 창 (다시 열지 않게)
+    private var chromeOpenedAtLaunch = Set<Int>()
     /// 열어 달라고 한 파일. 앱을 실행할 때 같이 열었거나, 실행 중인 앱에 나중에 열어 달라고 한 것
     private var openedDocuments = Set<String>()
 
@@ -283,6 +285,17 @@ final class Restorer: @unchecked Sendable {
             guard NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleId).isEmpty,
                   !app.bundleId.isEmpty, FileManager.default.fileExists(atPath: app.path) else {
                 if !app.path.isEmpty && !FileManager.default.fileExists(atPath: app.path) { report.missing.append("\(app.name) (설치되어 있지 않음)") }
+                continue
+            }
+            // Chrome: 빈 채로 띄우면 프로필이 여러 개일 때 프로필 선택 창이 뜬다. 저장한 첫 창의 주소로 실행하면 그 창이 바로 열린다.
+            // 나머지 창은 세션 복원을 기다린 뒤 없는 것만 연다 (requestMissingWindows)
+            if app.bundleId == BrowserService.chrome,
+               let first = snapshot.includedWindows.indices.first(where: { snapshot.includedWindows[$0].bundleId == app.bundleId && !snapshot.includedWindows[$0].tabURLs.isEmpty }) {
+                let urls = snapshot.includedWindows[first].tabURLs
+                BrowserService.openChromeWindow(urls)
+                chromeOpenedAtLaunch.insert(first)
+                progress("\(app.name) 실행: \(urls[0]) 외 \(urls.count - 1)개")
+                launchedAt[app.bundleId] = Date()
                 continue
             }
             let configuration = NSWorkspace.OpenConfiguration()
@@ -331,6 +344,7 @@ final class Restorer: @unchecked Sendable {
     private func placeWindows(_ windows: [SavedWindow]) {
         var pending = Array(windows.indices)
         var state = Placement()
+        state.chromeOpened = chromeOpenedAtLaunch
         let start = Date()
         events = mode == .full && !dryRun ? WindowEvents() : nil
         defer { events?.stop(); events = nil }
@@ -377,7 +391,7 @@ final class Restorer: @unchecked Sendable {
         scanSeconds += Date().timeIntervalSince(scanStart)
         scanCount += 1
         if scan.responding { state.unresponsive.remove(bundleId) } else { state.unresponsive.insert(bundleId) }
-        let live = scan.windows.filter { !state.used.contains($0.windowID) }
+        let live = BrowserService.withTabs(scan.windows.filter { !state.used.contains($0.windowID) }, bundleId: bundleId)
         // 약한 단서(제목 다름 등)는 앱이 안정된 뒤에: 원래 떠 있던 앱이거나, 띄운 지 5초가 지나고 창 수가 4초 동안 그대로일 때
         if state.countSince[bundleId]?.count != live.count { state.countSince[bundleId] = (live.count, Date()) }
         let countStableSince = state.countSince[bundleId]!.since
@@ -527,7 +541,7 @@ final class Restorer: @unchecked Sendable {
                 for (bundleId, indexes) in Dictionary(grouping: lateCandidates, by: { placedWindows[$0].bundleId }) {
                     let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
                     for app in apps { events.watch(app.processIdentifier) }
-                    let live = apps.flatMap { WindowService.scan(pid: $0.processIdentifier).windows }.filter { !used.contains($0.windowID) }
+                    let live = BrowserService.withTabs(apps.flatMap { WindowService.scan(pid: $0.processIdentifier).windows }.filter { !used.contains($0.windowID) }, bundleId: bundleId)
                     if countSince[bundleId]?.count != live.count { countSince[bundleId] = (live.count, Date()) }
                     // 약한 단서는 창 수가 4초 동안 그대로일 때만 (배치할 때와 같은 기준)
                     let stable = Date().timeIntervalSince(countSince[bundleId]!.since) > 4

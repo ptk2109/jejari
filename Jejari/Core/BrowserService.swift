@@ -41,6 +41,17 @@ enum BrowserService {
         return result
     }
 
+    /// 지금 Chrome 창들에 탭 주소 목록을 붙인다 (짝짓기에서 탭끼리 비교). Chrome이 아니면 그대로
+    static func withTabs(_ windows: [LiveWindow], bundleId: String) -> [LiveWindow] {
+        guard bundleId == chrome, !windows.isEmpty else { return windows }
+        let tabs = chromeWindows()
+        return windows.map { window in
+            var window = window
+            window.tabList = urls(for: window.frame, document: window.document, in: tabs) ?? []
+            return window
+        }
+    }
+
     /// AX 창에 해당하는 Chrome 창의 탭 URL. 위치가 같은 창, 없으면 보고 있는 탭이 같은 창.
     /// 다른 모니터의 창은 AppleScript 위치가 AX와 다르게 나오기도 해서 탭으로 한 번 더 찾는다 (모니터 4대에서 탭 0개로 저장됨)
     static func urls(for frame: CGRect, document: String, in windows: [ChromeWindow]) -> [String]? {

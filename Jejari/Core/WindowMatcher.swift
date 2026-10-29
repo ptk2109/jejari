@@ -8,10 +8,14 @@ protocol WindowClues {
     var document: String { get }
     var order: Int { get }
     var frame: CGRect { get }
+    /// 브라우저 창의 탭 주소 목록 (읽었으면). 없으면 빈 목록
+    var tabList: [String] { get }
 }
 
 extension LiveWindow: WindowClues {}
-extension SavedWindow: WindowClues {}
+extension SavedWindow: WindowClues {
+    var tabList: [String] { urls ?? [] }
+}
 
 /// 저장된 창 ↔ 지금 창 매칭 (기획서 4장 창 매칭 전략)
 /// macOS에는 재시작 뒤에도 유지되는 창 번호가 없고 제목도 자주 바뀌므로 여러 단서를 점수로 합친다.
@@ -25,14 +29,27 @@ enum WindowMatcher {
     /// nil = 확실히 다른 창 (다른 파일, 다른 사이트, 다른 JetBrains 프로젝트)
     static func score(saved: SavedWindow, live: some WindowClues) -> Int? {
         var score = 0
-        // 브라우저: 저장한 탭들의 사이트와 지금 보고 있는 탭(AXDocument)의 사이트를 비교
+        // 브라우저: 저장한 탭들과 지금 창의 탭들을 비교한다. 같은 주소가 많이 겹칠수록 높게 (같은 사이트 창 여러 개를 가른다).
+        // 지금 창의 탭 목록을 못 읽었으면 보고 있는 탭(AXDocument)의 사이트로.
+        // 저장한 뒤 보던 탭에서 다른 사이트로 가도 다른 탭이 겹치면 같은 창으로 본다 (같은 창을 하나 더 열지 않게).
         // URL이 없는 창(프로필 선택 창, 빈 창)은 저장된 브라우저 창과 짝짓지 않는다
         let urls = saved.tabURLs
         if !urls.isEmpty {
-            guard let host = URL(string: live.document)?.host else { return nil }
             let hosts = Set(urls.compactMap { URL(string: $0)?.host })
-            if !hosts.contains(host) { return nil }
-            score += 100
+            let liveTabs = live.tabList
+            if !liveTabs.isEmpty {
+                let same = Set(urls).intersection(liveTabs).count
+                if same > 0 {
+                    score += 100 + 40 * same / max(Set(urls).union(liveTabs).count, 1)
+                } else if !hosts.isDisjoint(with: liveTabs.compactMap { URL(string: $0)?.host }) {
+                    score += 80
+                } else {
+                    return nil
+                }
+            } else {
+                guard let host = URL(string: live.document)?.host, hosts.contains(host) else { return nil }
+                score += 100
+            }
         } else if !saved.document.isEmpty && !live.document.isEmpty {
             if saved.document == live.document {
                 score += 100

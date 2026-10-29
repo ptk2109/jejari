@@ -11,6 +11,8 @@ struct LiveWindow {
     let document: String
     let order: Int
     let frame: CGRect
+    /// 브라우저 창의 탭 주소 (불러올 때 Chrome만 채운다)
+    var tabList: [String] = []
 }
 
 /// 앱 하나를 훑은 결과
