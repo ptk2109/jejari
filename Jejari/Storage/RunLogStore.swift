@@ -1,11 +1,19 @@
 import Foundation
 
-/// 불러오기 기록: 직전 상태, 결과와 진행 로그, 불러온 뒤 상태를 남겨 결과를 추적한다. 설정 → 일반에서 끌 수 있다
+/// 불러오기 기록: 직전 상태, 결과와 진행 로그, 불러온 뒤 상태를 남겨 결과를 추적한다. 설정 → 일반에서 켜고 끈다.
+/// 창 제목·문서 경로·탭 주소가 들어가므로 배포판은 기본으로 남기지 않는다 (문제를 알려 줄 때 켬). 개발 빌드는 기본으로 남긴다.
+/// 자세한 진단 기록을 더할 때도 이 설정이 켜져 있을 때만 남긴다
 enum RunLogStore {
     static let keep = 20
 
+    #if DEBUG
+    private static let enabledByDefault = true
+    #else
+    private static let enabledByDefault = false
+    #endif
+
     static var isEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "debugLogging") as? Bool ?? true }
+        get { UserDefaults.standard.object(forKey: "debugLogging") as? Bool ?? enabledByDefault }
         set { UserDefaults.standard.set(newValue, forKey: "debugLogging") }
     }
 

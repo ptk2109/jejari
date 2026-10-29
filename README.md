@@ -120,7 +120,7 @@ open build/Build/Products/Release/Jejari.app
 
 ### 저장하는 것과 네트워크
 
-- 배치 파일에는 창 제목, 열린 문서 경로, Chrome 탭 주소가 들어갑니다. 맥 안(아래 "저장 위치")에만 저장하고 어디에도 보내지 않습니다
+- 배치 파일에는 창 제목, 열린 문서 경로, Chrome 탭 주소가 들어갑니다. 불러오기 기록을 켜면 기록에도 들어갑니다(기본은 꺼짐). 맥 안(아래 "저장 위치")에만 저장하고 어디에도 보내지 않습니다
 - 네트워크는 업데이트 확인에만 씁니다. 하루 한 번 GitHub의 `appcast.xml`을 받아 새 버전이 있는지 봅니다. 사용 기록이나 시스템 정보는 보내지 않습니다. 설정 → 일반 → 새 버전이 나오면? → 확인하지 않음으로 끌 수 있습니다
 
 ## 사용법
@@ -147,7 +147,7 @@ open "jejari://undo"
 ## 저장 위치
 
 - 배치: `~/Library/Application Support/Jejari/snapshots/<이름>.json`
-- 불러오기 기록(최근 20개): `~/Library/Application Support/Jejari/logs/`
+- 불러오기 기록(최근 20개): `~/Library/Application Support/Jejari/logs/`. 기본은 남기지 않는다. 불러오기가 이상하면 설정 → 일반 → "불러오기 기록을 남길까요?"를 **남기기**로 바꾸고 한 번 더 불러온 뒤, [기록 폴더 열기]의 폴더를 보내 주면 원인을 찾을 수 있다
 
 ## 지우기
 
