@@ -12,7 +12,7 @@ enum BrowserService {
     }
 
     static func chromeWindows() -> [ChromeWindow] {
-        guard !NSRunningApplication.runningApplications(withBundleIdentifier: chrome).isEmpty else { return [] }
+        guard !WindowService.running(chrome).isEmpty else { return [] }
         // tell Chrome 안에서는 tab이 Chrome의 탭 객체로 해석되므로 구분자는 문자 코드로 (0단계)
         let source = """
         tell application id "\(chrome)"
@@ -39,6 +39,17 @@ enum BrowserService {
             }
         }
         return result
+    }
+
+    /// 지금 Chrome 창들에 탭 주소 목록을 붙인다 (짝짓기에서 탭끼리 비교). Chrome이 아니면 그대로
+    static func withTabs(_ windows: [LiveWindow], bundleId: String) -> [LiveWindow] {
+        guard bundleId == chrome, !windows.isEmpty else { return windows }
+        let tabs = chromeWindows()
+        return windows.map { window in
+            var window = window
+            window.tabList = urls(for: window.frame, document: window.document, in: tabs) ?? []
+            return window
+        }
     }
 
     /// AX 창에 해당하는 Chrome 창의 탭 URL. 위치가 같은 창, 없으면 보고 있는 탭이 같은 창.

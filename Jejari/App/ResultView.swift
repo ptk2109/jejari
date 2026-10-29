@@ -9,6 +9,15 @@ struct ResultView: View {
             if let report = state.lastReport {
                 Text(state.lastReportName).font(.title3.bold())
                 Text(report.summary)
+                if !state.lateWaiting.isEmpty {
+                    HStack {
+                        Text("늦게 뜬 창 \(state.lateWaiting.count)개: \(state.lateWaiting.joined(separator: ", "))")
+                        Spacer()
+                        Button("제자리로 옮기기") { state.placeLateWindows() }
+                            .disabled(state.busy)
+                    }
+                    Text("가상화면을 바꿔야 옮길 수 있어서 누를 때까지 기다리고 있어요.").font(.caption).foregroundStyle(.secondary)
+                }
                 List {
                     section("⚠️ 문제", report.problems)
                     section("❌ 찾지 못한 창", report.missing)

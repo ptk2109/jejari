@@ -177,7 +177,7 @@ enum SpaceService {
     // macOS 27에서 Mission Control UI는 Dock이 아니라 WindowManager 프로세스의 AX 트리에 있다 (0단계)
 
     private static var windowManager: AXUIElement? {
-        NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.WindowManager").first
+        WindowService.running("com.apple.WindowManager").first
             .map { AXUIElementCreateApplication($0.processIdentifier) }
     }
 
@@ -266,7 +266,7 @@ enum SpaceService {
     static func setAutoRearrange(_ enabled: Bool) {
         CFPreferencesSetAppValue("mru-spaces" as CFString, enabled as CFBoolean, "com.apple.dock" as CFString)
         CFPreferencesAppSynchronize("com.apple.dock" as CFString)
-        NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").forEach { $0.terminate() }
+        WindowService.running("com.apple.dock").forEach { $0.terminate() }
     }
 
     /// "디스플레이마다 별도 Spaces". 바꾸면 로그아웃해야 적용되므로 읽기만 한다

@@ -10,7 +10,7 @@ enum OtherAppsService {
 
     /// bundle ID로 앱 이름 (실행 중이 아니면 설치된 앱에서 찾는다)
     static func appName(_ bundleId: String) -> String {
-        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first, let name = app.localizedName { return name }
+        if let app = WindowService.running(bundleId).first, let name = app.localizedName { return name }
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) { return FileManager.default.displayName(atPath: url.path) }
         return bundleId
     }

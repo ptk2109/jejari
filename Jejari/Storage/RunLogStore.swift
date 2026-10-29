@@ -30,7 +30,8 @@ enum RunLogStore {
 
     /// logs/<시각>-<배치 이름>/ 에 snapshot.json(불러온 배치), before.json, report.json, after.json.
     /// snapshot과 before, report의 짝(matches)으로 짝짓기를 다시 돌려 볼 수 있다 (jejari://replay)
-    static func record(_ entry: Entry, snapshot: Snapshot, before: Snapshot?, after: Snapshot?) {
+    @discardableResult
+    static func record(_ entry: Entry, snapshot: Snapshot, before: Snapshot?, after: Snapshot?) -> URL {
         let encoder = SnapshotStore.encoder
         let stamp = entry.startedAt.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false).timeSeparator(.omitted).dateSeparator(.dash))
         let folder = directory.appendingPathComponent("\(stamp)-\(SnapshotStore.fileName(entry.snapshot))", isDirectory: true)
@@ -40,6 +41,23 @@ enum RunLogStore {
         if let before { try? encoder.encode(before).write(to: folder.appendingPathComponent("before.json")) }
         if let after { try? encoder.encode(after).write(to: folder.appendingPathComponent("after.json")) }
         prune()
+        return folder
+    }
+
+    /// 끝난 뒤 지켜보기에서 늦게 뜬 창을 어떻게 했는지 late.json에 덧붙인다
+    static func appendLate(_ folder: URL, _ lines: [String]) {
+        guard !lines.isEmpty, FileManager.default.fileExists(atPath: folder.path) else { return }
+        let url = folder.appendingPathComponent("late.json")
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var entries = (try? Data(contentsOf: url)).flatMap { try? decoder.decode([LateEntry].self, from: $0) } ?? []
+        entries += lines.map { LateEntry(at: Date(), what: $0) }
+        try? SnapshotStore.encoder.encode(entries).write(to: url, options: .atomic)
+    }
+
+    struct LateEntry: Codable {
+        var at: Date
+        var what: String
     }
 
     private static func prune() {

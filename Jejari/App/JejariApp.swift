@@ -93,8 +93,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         [.banner, .sound]
     }
 
-    /// 알림을 누르면 결과 창
+    /// 알림을 누르면 결과 창. 늦게 뜬 창 알림이면 그 창들을 옮긴다
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        await MainActor.run { AppState.shared.open(.result) }
+        let id = response.notification.request.identifier
+        await MainActor.run {
+            if id == AppState.lateNotificationID { AppState.shared.placeLateWindows() } else { AppState.shared.open(.result) }
+        }
     }
 }

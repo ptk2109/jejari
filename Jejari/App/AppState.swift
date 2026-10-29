@@ -29,6 +29,19 @@ final class AppState: ObservableObject {
     /// 배치 관리에서 포함할 창을 다시 고르는 중인 스냅샷
     @Published var editing: Snapshot?
 
+    /// 불러오기가 끝난 뒤 늦게 떴지만 가상화면을 바꿔야 해서 사용자가 누를 때까지 기다리는 창
+    @Published var lateWaiting: [String] = []
+    /// 아직 뜨지 않아 지켜보는 창과 지켜보기가 끝나는 시각 (메뉴 맨 위에 보인다)
+    @Published var lateWatching: [String] = []
+    @Published var lateDeadline: Date?
+    /// 끝난 뒤 지켜보는 불러오기. 다른 작업을 시작하면 멈춘다
+    private var lateRestorer: Restorer?
+    private var lateFlag: CancelFlag?
+    private var lateLogFolder: URL?
+    /// 끝난 뒤 지켜보는 시간
+    nonisolated static let lateWatchDuration: TimeInterval = 180
+    nonisolated static let lateNotificationID = "late-windows"
+
     /// SwiftUI 창을 여는 동작. 메뉴바 아이콘이 나타날 때 받아 둔다
     var openWindowAction: OpenWindowAction?
 
@@ -95,6 +108,7 @@ final class AppState: ObservableObject {
     /// 창을 모은 뒤 저장 확인 창을 연다 (기획서 12.6: 수집된 창을 체크박스로 보여 주고 고르게 한다)
     func startSave() {
         guard ensureAccessibility(quiet: false), !busy else { return }
+        cancelLate()
         busy = true
         status = "창을 모으는 중…"
         draft = nil
@@ -167,6 +181,7 @@ final class AppState: ObservableObject {
     /// 외부 명령용: 확인 창 없이 바로 저장. 같은 이름이 있으면 저장 창처럼 설정과 뺀 앱·창을 이어받는다
     func save(_ name: String, quiet: Bool) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
+        cancelLate()
         busy = true
         status = "창을 모으는 중…"
         let old = try? SnapshotStore.loadForMatching(name)
@@ -283,6 +298,7 @@ final class AppState: ObservableObject {
     }
 
     private func restoreLoaded(_ snapshot: Snapshot, name: String, mode: RestoreMode, isUndo: Bool, quiet: Bool, verifyOnly: Bool) {
+        if !verifyOnly { cancelLate() }
         busy = true
         if !isUndo && !verifyOnly { Self.lastRestoredName = name }
         status = verifyOnly ? "\"\(name)\" 검증 중…" : "\"\(name)\" 불러오는 중… 키보드와 마우스에서 손을 떼 주세요"
@@ -295,16 +311,18 @@ final class AppState: ObservableObject {
                 if !isUndo, let before { try? SnapshotStore.save(before) }
             }
             let log = LogBox()
-            let report = Restorer(snapshot: snapshot, mode: mode, dryRun: verifyOnly) { message in
+            let restorer = Restorer(snapshot: snapshot, mode: mode, dryRun: verifyOnly) { message in
                 log.append(message)
                 Task { @MainActor in self.status = message }
-            }.run()
+            }
+            let report = restorer.run()
             // 다음에 불러오거나 다시 저장할 때 쓰도록 이번 짝을 기억한다 (앱이 켜져 있는 동안만 맞음)
             if !verifyOnly && !isUndo { MatchCache.remember(snapshot, matches: report.matches ?? []) }
+            var folder: URL?
             if !verifyOnly && RunLogStore.isEnabled {
                 let after = WindowService.capture(name: name)
-                RunLogStore.record(.init(snapshot: isUndo ? "되돌리기" : name, mode: mode.rawValue, startedAt: startedAt, finishedAt: Date(),
-                                         report: report, log: log.lines), snapshot: snapshot, before: before, after: after)
+                folder = RunLogStore.record(.init(snapshot: isUndo ? "되돌리기" : name, mode: mode.rawValue, startedAt: startedAt, finishedAt: Date(),
+                                                  report: report, log: log.lines), snapshot: snapshot, before: before, after: after)
             }
             await MainActor.run {
                 self.busy = false
@@ -322,6 +340,92 @@ final class AppState: ObservableObject {
                     self.notify(report)
                 }
             }
+            // 앱은 떠 있는데 못 찾은 창은 끝난 뒤에도 지켜본다 (로그인을 거쳐 늦게 뜨는 앱 등)
+            guard mode == .full, !verifyOnly, !isUndo, !restorer.lateCandidates.isEmpty else { return }
+            let flag = CancelFlag()
+            let watching = restorer.lateCandidateNames()
+            await MainActor.run {
+                self.lateRestorer = restorer
+                self.lateFlag = flag
+                self.lateLogFolder = folder
+                self.lateWatching = watching
+                self.lateDeadline = Date().addingTimeInterval(Self.lateWatchDuration)
+            }
+            restorer.watchLate(for: Self.lateWatchDuration, isCancelled: { flag.isSet }) { update in
+                if let folder { RunLogStore.appendLate(folder, update.placed.map { "옮김: \($0)" } + update.waiting.map { "누를 때까지 기다림: \($0)" }) }
+                Task { @MainActor in self.applyLate(update, notifyWaiting: true) }
+            }
+            await MainActor.run {
+                guard self.lateFlag === flag else { return }
+                self.lateWatching = []
+                self.lateDeadline = nil
+                // 누르기를 기다리는 창이 없으면 다 끝났다. 있으면 사용자가 누를 때까지 남겨 둔다
+                if self.lateWaiting.isEmpty { self.lateRestorer = nil }
+            }
+        }
+    }
+
+    // MARK: 늦게 뜬 창
+
+    /// 끝난 뒤 지켜보기를 멈춘다. 다른 저장·불러오기·정리하기가 창을 옮기는 것과 겹치지 않게
+    func cancelLate() {
+        lateFlag?.set()
+        lateFlag = nil
+        lateRestorer = nil
+        lateWaiting = []
+        lateWatching = []
+        lateDeadline = nil
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.lateNotificationID])
+    }
+
+    /// 지켜보기만 멈춘다 (메뉴의 "그만 기다리기"). 이미 떠서 누르기를 기다리는 창은 남긴다
+    func stopLateWatching() {
+        lateFlag?.set()
+        lateWatching = []
+        lateDeadline = nil
+        if lateWaiting.isEmpty { lateRestorer = nil }
+    }
+
+    /// 끝난 뒤 지켜보기 결과를 반영한다. 새로 기다리게 된 창이 있으면 알린다
+    private func applyLate(_ update: Restorer.LateUpdate, notifyWaiting: Bool) {
+        lastReport = update.report
+        if lateDeadline != nil { lateWatching = update.pending }
+        let more = update.waiting.count > lateWaiting.count
+        lateWaiting = update.waiting
+        if !update.placed.isEmpty { status = "늦게 뜬 창을 제자리로: \(update.placed.joined(separator: ", "))" }
+        if notifyWaiting && more { notifyLate(update.waiting) }
+    }
+
+    /// 늦게 떴지만 가상화면을 바꿔야 해서 기다리던 창을 옮긴다 (알림, 메뉴, 결과 창에서 눌렀을 때)
+    func placeLateWindows(quiet: Bool = false) {
+        guard let restorer = lateRestorer, !lateWaiting.isEmpty, !busy else {
+            if quiet { writeResult(ActionResult(action: "late", name: "", finishedAt: Date(), ok: false, summary: "기다리는 늦은 창 없음")) }
+            return
+        }
+        busy = true
+        status = "늦게 뜬 창을 옮기는 중… 키보드와 마우스에서 손을 떼 주세요"
+        let folder = lateLogFolder
+        Task.detached {
+            let update = restorer.placeWaitingLate()
+            if let folder { RunLogStore.appendLate(folder, update.placed.map { "옮김 (눌러서): \($0)" }) }
+            await MainActor.run {
+                self.busy = false
+                self.applyLate(update, notifyWaiting: false)
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.lateNotificationID])
+                if quiet { self.writeResult(ActionResult(action: "late", name: "", finishedAt: Date(), ok: true, summary: self.status, moved: update.placed)) }
+            }
+        }
+    }
+
+    /// 늦게 뜬 창을 알린다. 누르면 옮긴다 (가상화면이 잠깐 바뀌므로 묻지 않고 옮기지 않는다)
+    private func notifyLate(_ waiting: [String]) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }  // 메뉴와 결과 창에도 옮기기 버튼이 있다
+            let content = UNMutableNotificationContent()
+            content.title = "제자리: 늦게 뜬 창 \(waiting.count)개"
+            content.body = waiting.joined(separator: ", ") + "\n누르면 제자리로 옮겨요 (가상화면이 잠깐 바뀌어요)"
+            center.add(UNNotificationRequest(identifier: AppState.lateNotificationID, content: content, trigger: nil))
         }
     }
 
@@ -354,6 +458,7 @@ final class AppState: ObservableObject {
     }
 
     private func runCleanup(title: String, quitApps: [NSRunningApplication], quiet: Bool) {
+        cancelLate()
         busy = true
         status = "\(title) 중… 키보드와 마우스에서 손을 떼 주세요"
         Task.detached {
@@ -450,6 +555,14 @@ final class AppState: ObservableObject {
 }
 
 /// 백그라운드 복원 중 진행 메시지를 모은다
+/// 다른 스레드에서 보는 멈춤 신호
+final class CancelFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.withLock { value = true } }
+    var isSet: Bool { lock.withLock { value } }
+}
+
 final class LogBox: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [String] = []

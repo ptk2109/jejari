@@ -205,6 +205,16 @@ extension Date {
     /// 배치 목록에 보일 저장 시각: 2026-10-28 09:19 (언어 설정과 상관없이 같은 모양, 24시간)
     var listStamp: String { Self.listStampFormatter.string(from: self) }
 
+    /// 시각만: 10:42 (24시간)
+    var clockStamp: String { Self.clockStampFormatter.string(from: self) }
+
+    private static let clockStampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
     private static let listStampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
