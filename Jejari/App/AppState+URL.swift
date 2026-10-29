@@ -13,7 +13,7 @@ struct ActionResult: Codable {
     var log: [String] = []
 }
 
-/// 외부 명령: jejari://save?name=…, restore?name=…[&mode=full|arrange], verify?name=…, undo, collapse, wipe, status, grant, open?window=…
+/// 외부 명령: jejari://save?name=…, restore?name=…[&mode=full|arrange], verify?name=…, undo, collapse, wipe, late, status, grant, open?window=…
 ///
 /// 웹페이지나 다른 앱도 보낼 수 있으므로 배포판에서는 위험도에 따라 나눈다.
 /// - 읽기·창 열기(status, verify, open, grant): 항상
@@ -40,7 +40,7 @@ extension AppState {
         let mode = query.first { $0.name == "mode" }?.value.flatMap(RestoreMode.init) ?? .full
         let ask = !Self.isDevBuild
 
-        if ["save", "restore", "undo", "collapse", "wipe"].contains(command) && !Self.allowsExternalCommands {
+        if ["save", "restore", "undo", "collapse", "wipe", "late"].contains(command) && !Self.allowsExternalCommands {
             status = "외부 명령(\(command))을 막음: 설정 → 일반에서 허용할 수 있어요"
             writeResult(ActionResult(action: command, name: name, finishedAt: Date(), ok: false, summary: "외부 명령이 꺼져 있음 (설정 → 일반 → 외부 명령)"))
             return
@@ -52,6 +52,7 @@ extension AppState {
         case "verify": restore(name, quiet: true, verifyOnly: true)
         case "undo": restore(SnapshotStore.previousStateName, mode: .arrange, isUndo: true, quiet: true)
         case "collapse": collapse(quiet: true, ask: ask)
+        case "late": placeLateWindows(quiet: true)
         case "wipe": wipe(quiet: true, ask: ask)
         case "grant":
             // 권한 요청 창을 띄워 손쉬운 사용 목록에 제자리를 올리고 설정 화면을 연다

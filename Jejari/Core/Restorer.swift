@@ -67,6 +67,12 @@ final class Restorer: @unchecked Sendable {
     private var pairedByID = 0, pairedByClues = 0
     /// 배치 중 창을 훑은 시간 합계와 횟수 (불러오기 기록의 단계별 시간)
     private var scanSeconds: TimeInterval = 0, scanCount = 0
+    /// 창 생김 알림 (② 전체 복원 중에만)
+    private var events: WindowEvents?
+    /// 배치에 쓴 저장 창 (모니터 대체를 반영한 것). 끝난 뒤 지켜보기도 이것으로 짝짓는다
+    private var placedWindows: [SavedWindow] = []
+    /// 앱은 떠 있는데 끝날 때까지 짝을 못 찾은 저장 창 (끝난 뒤 지켜보기 대상)
+    private(set) var lateCandidates: [Int] = []
 
     // MARK: 가상화면 초기화
 
@@ -147,6 +153,7 @@ final class Restorer: @unchecked Sendable {
             bridge = VirtualDisplay()
             if bridge == nil { bridgeFailed = true } else { progress("모니터가 1대라 임시 모니터를 만듦") }
         }
+        placedWindows = windows
         timed("창 배치") { placeWindows(windows) }
         report.timings = (report.timings ?? []) + [.init(step: "창 훑기(배치 중 합계, \(scanCount)번)", seconds: (scanSeconds * 10).rounded() / 10)]
         if !dryRun && mode == .full { timed("가상화면 정리") { tidySpaces(extra: extraSpaces) } }
@@ -313,29 +320,39 @@ final class Restorer: @unchecked Sendable {
         var lastProjectOpen: [String: (index: Int, at: Date)] = [:]   // 앱마다 마지막으로 연 JetBrains 프로젝트
         var lastRequest: [String: Date] = [:]           // 앱마다 마지막으로 창을 열어 달라고 한 시각
         var lastProgress = Date()
+        var toPlace: [(index: Int, live: LiveWindow)] = []   // 이번 바퀴에 짝지은 것. 모았다가 도착할 자리 순으로 옮긴다
     }
 
-    /// 창을 열어 달라고 한 뒤 그 앱을 포기하기 전에 기다리는 시간. 느린 앱(Xcode, DataGrip)은 창이 뜨는 데 15초 넘게 걸린다
-    private static let requestGrace: TimeInterval = 30
+    /// 앱의 마지막 움직임(실행, 창을 열어 달라는 요청, 창이 생김, 창 수 변화) 뒤 이만큼 조용하면 그 앱은 그만 기다린다.
+    /// 느린 앱(Xcode, DataGrip)은 요청 뒤 창이 뜨는 데 20초쯤 걸린다. 그보다 늦은 창은 끝난 뒤 지켜보기(watchLate)가 받는다
+    private static let quietPeriod: TimeInterval = 30
 
     /// 앱마다 따로 보면서 뜬 창부터 배치한다. 한 앱이 늦거나 입력을 기다려도 다른 앱을 막지 않는다 (기획서 12.2 #5, #20)
     private func placeWindows(_ windows: [SavedWindow]) {
         var pending = Array(windows.indices)
         var state = Placement()
         let start = Date()
+        events = mode == .full && !dryRun ? WindowEvents() : nil
+        defer { events?.stop(); events = nil }
 
         while !pending.isEmpty {
             var still: [Int] = []
             for (bundleId, indexes) in Dictionary(grouping: pending, by: { windows[$0].bundleId }) {
                 still += placeApp(bundleId, indexes, windows, &state)
             }
+            // 모니터·가상화면 순으로 옮겨 가상화면 전환을 줄인다
+            for item in state.toPlace.sorted(by: { (windows[$0.index].displayUuid, targetIndex(windows[$0.index])) < (windows[$1.index].displayUuid, targetIndex(windows[$1.index])) }) {
+                place(windows[item.index], item.live)
+            }
+            state.toPlace = []
             pending = still
             if pending.isEmpty || mode == .arrange { break }
             // 남은 것이 모두 입력 대기·응답 없음 앱이고 15초 진전이 없으면 끝. 아니면 최대 120초
             let elapsed = Date().timeIntervalSince(start)
             let onlyStuck = pending.allSatisfy { state.blocked[windows[$0].bundleId] != nil || state.unresponsive.contains(windows[$0].bundleId) }
             if elapsed > 120 || (elapsed > 20 && onlyStuck && Date().timeIntervalSince(state.lastProgress) > 15) { break }
-            sleep(2)
+            // 창이 생기면 바로 깨어난다. 알림을 주지 않는 앱이 있어 2초마다도 본다
+            if let events { events.wait(timeout: 2) } else { sleep(2) }
         }
         reportUnplaced(pending, windows, state)
         if pairedByID > 0 { progress("짝짓기: 창 번호로 \(pairedByID)개, 단서로 \(pairedByClues)개") }
@@ -346,6 +363,7 @@ final class Restorer: @unchecked Sendable {
     private func placeApp(_ bundleId: String, _ indexes: [Int], _ windows: [SavedWindow], _ state: inout Placement) -> [Int] {
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
         guard !apps.isEmpty else { return indexes }
+        for app in apps { events?.watch(app.processIdentifier) }
         let appName = windows[indexes[0]].appName
         var scan = AppScan()
         let scanStart = Date()
@@ -372,7 +390,7 @@ final class Restorer: @unchecked Sendable {
             matchedLive[pair.savedIndex] = pair.live
             state.placedIndexes.insert(pair.savedIndex)
             state.used.insert(pair.live.windowID)
-            place(windows[pair.savedIndex], pair.live)
+            state.toPlace.append((pair.savedIndex, pair.live))
             state.lastProgress = Date()
         }
         let matched = Set(pairs.map(\.savedIndex))
@@ -391,11 +409,10 @@ final class Restorer: @unchecked Sendable {
         }
         guard mode == .full, !left.isEmpty else { return left }
 
-        // 앱이 자리 잡았는데(창 수 15초 그대로, 띄운 지 20초 이상, 마지막 요청 뒤 30초 이상) 입력 대기도 아니고
-        // 할 수 있는 요청도 다 했으면 그 앱은 그만 기다린다
-        let settled = Date().timeIntervalSince(countStableSince) > 15
-            && Date().timeIntervalSince(launchedAt[bundleId] ?? .distantPast) > 20
-            && Date().timeIntervalSince(state.lastRequest[bundleId] ?? .distantPast) > Self.requestGrace
+        // 앱이 마지막으로 움직인 뒤 조용하고, 입력 대기도 아니고, 할 수 있는 요청도 다 했으면 그 앱은 그만 기다린다
+        let lastActivity = ([countStableSince, launchedAt[bundleId], state.lastRequest[bundleId]]
+            + apps.map { events?.lastCreated(of: $0.processIdentifier) }).compactMap { $0 }.max() ?? .distantPast
+        let settled = Date().timeIntervalSince(lastActivity) > Self.quietPeriod
         let isJetBrains = JetBrainsService.isJetBrains(bundleId)
         let hasDocuments = left.contains { windows[$0].filePath != nil }
         let triedAll = (state.reopened.contains(bundleId) || !live.isEmpty || bundleId == BrowserService.chrome || isJetBrains || hasDocuments)
@@ -404,6 +421,7 @@ final class Restorer: @unchecked Sendable {
             && left.allSatisfy { state.projectOpened.contains($0) || !WindowMatcher.isProjectTitle(windows[$0]) }
         if settled, triedAll, blockers.isEmpty, scan.responding {
             report.missing += left.map { "\(windows[$0].appName) \"\(windows[$0].title)\" (앱을 실행했지만 이 창이 열리지 않음)" }
+            lateCandidates += left
             return []
         }
         requestMissingWindows(bundleId, left, windows, app: apps[0], hasWindows: !live.isEmpty, waitingInput: !blockers.isEmpty,
@@ -473,7 +491,109 @@ final class Restorer: @unchecked Sendable {
             let running = !NSRunningApplication.runningApplications(withBundleIdentifier: w.bundleId).isEmpty
             let reason = !running ? "앱이 꺼져 있음" : (state.blocked[w.bundleId] != nil ? "입력 대기 중" : "맞는 창을 찾지 못함 (창이 없거나 다른 창)")
             report.missing.append("\(w.appName) \"\(w.title)\" (\(reason))")
+            // 앱이 떠 있으면 끝난 뒤에도 지켜본다 (② 전체 복원). 입력을 마친 뒤 뜨는 창도 받는다
+            if running && mode == .full && !dryRun && !state.unresponsive.contains(w.bundleId) { lateCandidates.append(i) }
         }
+    }
+
+    // MARK: 끝난 뒤 지켜보기
+
+    /// 끝난 뒤 지켜보기의 결과. waiting은 가상화면을 바꿔야 옮길 수 있어 사용자가 누를 때까지 기다리는 창
+    struct LateUpdate {
+        var report: RestoreReport
+        var placed: [String]
+        var waiting: [String]
+    }
+
+    /// 늦게 떴지만 가상화면을 바꿔야 옮길 수 있는 창
+    private var waitingLate: [(index: Int, live: LiveWindow)] = []
+    /// 지켜보기와 사용자가 누른 옮기기가 겹치지 않게
+    private let lateLock = NSLock()
+
+    /// 불러오기가 끝난 뒤에도 못 찾은 창을 duration 동안 지켜본다 (로그인을 거쳐 늦게 뜨는 메신저 등).
+    /// 창이 뜨면, 가상화면을 바꾸지 않고 옮길 수 있으면(목표가 지금 보이는 화면) 바로 옮긴다.
+    /// 바꿔야 하면 사용자가 작업 중일 수 있어 옮기지 않고 waiting으로 알린다 (placeWaitingLate)
+    func watchLate(for duration: TimeInterval, isCancelled: () -> Bool, onChange: (LateUpdate) -> Void) {
+        guard !lateCandidates.isEmpty else { return }
+        let events = WindowEvents()
+        defer { events.stop() }
+        let start = Date()
+        var countSince: [String: (count: Int, since: Date)] = [:]
+        while Date().timeIntervalSince(start) < duration, !isCancelled() {
+            let update: LateUpdate? = lateLock.withLock {
+                guard !lateCandidates.isEmpty else { return nil }
+                var placed: [String] = [], newlyWaiting = false
+                let used = Set(matchedLive.values.map(\.windowID))
+                for (bundleId, indexes) in Dictionary(grouping: lateCandidates, by: { placedWindows[$0].bundleId }) {
+                    let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+                    for app in apps { events.watch(app.processIdentifier) }
+                    let live = apps.flatMap { WindowService.scan(pid: $0.processIdentifier).windows }.filter { !used.contains($0.windowID) }
+                    if countSince[bundleId]?.count != live.count { countSince[bundleId] = (live.count, Date()) }
+                    // 약한 단서는 창 수가 4초 동안 그대로일 때만 (배치할 때와 같은 기준)
+                    let stable = Date().timeIntervalSince(countSince[bundleId]!.since) > 4
+                    for pair in WindowMatcher.pair(saved: indexes.map { ($0, placedWindows[$0]) }, live: live, id: \.windowID, allowWeak: stable) {
+                        lateCandidates.removeAll { $0 == pair.savedIndex }
+                        matchedLive[pair.savedIndex] = pair.live
+                        report.matches = (report.matches ?? []) + [.init(saved: pair.savedIndex, title: placedWindows[pair.savedIndex].title,
+                                                                        windowID: pair.live.windowID, pid: pair.live.pid, score: pair.score)]
+                        if reachableWithoutSwitching(placedWindows[pair.savedIndex], pair.live) {
+                            if let name = placeLate(pair.savedIndex, pair.live) { placed.append(name) }
+                        } else {
+                            waitingLate.append((pair.savedIndex, pair.live))
+                            newlyWaiting = true
+                        }
+                    }
+                }
+                return placed.isEmpty && !newlyWaiting ? nil : LateUpdate(report: report, placed: placed, waiting: waitingNames())
+            }
+            if let update { onChange(update) }
+            if lateLock.withLock({ lateCandidates.isEmpty }) { break }
+            events.wait(timeout: 5)
+        }
+    }
+
+    /// 기다리던 늦은 창을 옮긴다 (사용자가 알림이나 결과 창에서 눌렀을 때). 끝나면 원래 보던 가상화면으로 돌아간다
+    func placeWaitingLate() -> LateUpdate {
+        lateLock.withLock {
+            let items = waitingLate
+            waitingLate = []
+            let before = displays.keys.compactMap { display in SpaceService.currentIndex(of: display).map { (display, $0) } }
+            var placed: [String] = []
+            for item in items.sorted(by: { (placedWindows[$0.index].displayUuid, targetIndex(placedWindows[$0.index])) < (placedWindows[$1.index].displayUuid, targetIndex(placedWindows[$1.index])) }) {
+                if let name = placeLate(item.index, item.live) { placed.append(name) }
+            }
+            if let bridge {
+                bridge.remove()
+                self.bridge = nil
+            }
+            for (display, index) in before { SpaceService.switchTo(display: display, index: index) }
+            return LateUpdate(report: report, placed: placed, waiting: [])
+        }
+    }
+
+    private func waitingNames() -> [String] {
+        waitingLate.map { "\(placedWindows[$0.index].appName) \"\(placedWindows[$0.index].title.prefix(30))\"" }
+    }
+
+    /// 가상화면을 바꾸지 않고 옮길 수 있는지: 이미 목표 가상화면에 있거나,
+    /// 목표가 그 모니터에서 지금 보이는 가상화면이고 창도 지금 보이는 화면에 있을 때 (다른 모니터로 옮기기만 하면 됨)
+    private func reachableWithoutSwitching(_ saved: SavedWindow, _ live: LiveWindow) -> Bool {
+        let index = targetIndex(saved)
+        guard displays[saved.displayUuid] != nil, let now = SpaceService.location(of: live.windowID) else { return false }
+        if now.display == saved.displayUuid && now.index == index { return true }
+        return now.display != saved.displayUuid && SpaceService.currentIndex(of: saved.displayUuid) == index
+            && SpaceService.currentIndex(of: now.display) == now.index
+    }
+
+    /// 늦게 뜬 창을 옮기고 결과를 고친다: "없음"에서 빼고 "옮김"에 (늦게 뜸)을 붙인다
+    private func placeLate(_ index: Int, _ live: LiveWindow) -> String? {
+        let saved = placedWindows[index]
+        let movedBefore = report.moved.count, inPlaceBefore = report.alreadyInPlace
+        place(saved, live)
+        report.missing.removeAll { $0.hasPrefix("\(saved.appName) \"\(saved.title)\" (") }
+        guard report.moved.count > movedBefore || report.alreadyInPlace > inPlaceBefore else { return nil }
+        if report.moved.count > movedBefore { report.moved[report.moved.count - 1] += " (늦게 뜸)" }
+        return "\(saved.appName) \"\(saved.title.prefix(30))\""
     }
 
     private func place(_ saved: SavedWindow, _ live: LiveWindow) {

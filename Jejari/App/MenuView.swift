@@ -41,6 +41,10 @@ struct MenuView: View {
         }
         Button("마지막 결과 보기") { state.open(.result) }
             .disabled(state.lastReport == nil)
+        if !state.lateWaiting.isEmpty {
+            Button("늦게 뜬 창 \(state.lateWaiting.count)개 제자리로") { state.placeLateWindows() }
+                .disabled(state.busy)
+        }
 
         Divider()
 
