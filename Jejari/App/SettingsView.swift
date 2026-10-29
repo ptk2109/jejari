@@ -71,8 +71,8 @@ private struct GeneralSettings: View {
                     RunLogStore.isEnabled = on
                     logging = on
                 }), options: [
-                    (true, "남기기", "불러올 때마다 직전 상태, 결과, 불러온 뒤 상태를 최근 20개까지 남겨요. 1~2초 더 걸려요.\n예) \"어제 불러오기가 이상했어\" 할 때 무엇이 어떻게 됐는지 찾아볼 수 있어요."),
-                    (false, "남기지 않기", "기록 없이 조금 더 빨리 불러와요. 결과는 '마지막 결과 보기'에서만 볼 수 있어요."),
+                    (false, "남기지 않기 (추천)", "기록 없이 불러와요. 결과는 '마지막 결과 보기'에서 볼 수 있어요."),
+                    (true, "남기기", "불러올 때마다 직전 상태, 결과, 불러온 뒤 상태를 이 맥에 최근 20개까지 남겨요. 창 제목, 문서 경로, 탭 주소가 들어가고 1~2초 더 걸려요. 어디에도 보내지 않아요.\n예) 불러오기가 이상할 때 켜고 한 번 더 불러온 뒤, [기록 폴더 열기]로 폴더를 보내 문제를 알려 주세요."),
                 ])
                 Button("기록 폴더 열기") {
                     try? FileManager.default.createDirectory(at: RunLogStore.directory, withIntermediateDirectories: true)
