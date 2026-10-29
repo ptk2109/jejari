@@ -7,6 +7,8 @@ version: 0.7.0
 stack: [swift, swiftui, appkit]
 platform: macos-15+
 repo: https://github.com/ptk2109/jejari
+requires:
+  env: [LAB_APPLE_TEAM]   # 서명 Team ID. ~/.zshenv에 export. xcodegen generate 때 project.yml에 치환됨
 commands:
   generate: "xcodegen generate"    # project.yml → Jejari.xcodeproj (생성물, 커밋 안 함)
   build: "xcodebuild -project Jejari.xcodeproj -scheme Jejari -configuration Debug -derivedDataPath build -allowProvisioningUpdates build"
