@@ -8,6 +8,22 @@ struct RestoreReport: Codable {
     var problems: [String] = []     // 옮겼지만 문제가 있거나 옮길 수 없음
     var otherApps: [String] = []    // 다른 앱 처리 결과 (숨김, 종료 요청)
     var spaces: [String] = []       // 가상화면 정리 결과
+    /// 짝지은 결과 (불러오기 기록용: 다시 돌려 보기와 비교). saved는 includedWindows 안 번호
+    var matches: [MatchRecord]? = nil
+    /// 단계별 걸린 시간(초). 순서대로
+    var timings: [Timing]? = nil
+
+    struct MatchRecord: Codable {
+        var saved: Int
+        var title: String
+        var windowID: CGWindowID
+        var score: Int
+    }
+
+    struct Timing: Codable {
+        var step: String
+        var seconds: Double
+    }
 
     var summary: String {
         var parts = ["✅ \(moved.count + alreadyInPlace)개 제자리"]
@@ -48,6 +64,8 @@ final class Restorer: @unchecked Sendable {
     private var matchedLive: [Int: LiveWindow] = [:]
     /// 창 번호로 짝지은 수, 단서 점수로 짝지은 수
     private var pairedByID = 0, pairedByClues = 0
+    /// 배치 중 창을 훑은 시간 합계와 횟수 (불러오기 기록의 단계별 시간)
+    private var scanSeconds: TimeInterval = 0, scanCount = 0
 
     // MARK: 가상화면 초기화
 
@@ -90,18 +108,27 @@ final class Restorer: @unchecked Sendable {
         self.progress = progress
     }
 
+    /// 단계 하나의 시간을 잰다
+    private func timed<T>(_ step: String, _ body: () -> T) -> T {
+        let start = Date()
+        defer { report.timings = (report.timings ?? []) + [.init(step: step, seconds: (Date().timeIntervalSince(start) * 10).rounded() / 10)] }
+        return body()
+    }
+
     func run() -> RestoreReport {
+        let started = Date()
         displays = Dictionary(uniqueKeysWithValues: DisplayService.current().map { ($0.uuid, $0.frame) })
         var windows = snapshot.includedWindows  // 사용자가 뺀 창은 건드리지 않는다
         resetSpaces = !dryRun && mode == .full && shouldReset()
         let extraSpaces = substituteMissingDisplays(&windows)
-        if resetSpaces { clearSpaces() }
-
-        if !dryRun && SkyLight.hotKeysAvailable && !SpaceService.disabledDesktopHotKeys().isEmpty {
-            SpaceService.enableDesktopHotKeys()
-            progress("데스크톱 전환 단축키를 켬")
+        timed("가상화면 준비") {
+            if resetSpaces { clearSpaces() }
+            if !dryRun && SkyLight.hotKeysAvailable && !SpaceService.disabledDesktopHotKeys().isEmpty {
+                SpaceService.enableDesktopHotKeys()
+                progress("데스크톱 전환 단축키를 켬")
+            }
+            if !dryRun { addMissingSpaces(extraSpaces) }
         }
-        if !dryRun { addMissingSpaces(extraSpaces) }
         chooseSpaceLookup(extraSpaces)
         if mode == .full && !dryRun {
             // 다른 앱 처리를 먼저 해서 배치할 때 화면이 덜 복잡하게
@@ -119,8 +146,9 @@ final class Restorer: @unchecked Sendable {
             bridge = VirtualDisplay()
             if bridge == nil { bridgeFailed = true } else { progress("모니터가 1대라 임시 모니터를 만듦") }
         }
-        placeWindows(windows)
-        if !dryRun && mode == .full { tidySpaces(extra: extraSpaces) }
+        timed("창 배치") { placeWindows(windows) }
+        report.timings = (report.timings ?? []) + [.init(step: "창 훑기(배치 중 합계, \(scanCount)번)", seconds: (scanSeconds * 10).rounded() / 10)]
+        if !dryRun && mode == .full { timed("가상화면 정리") { tidySpaces(extra: extraSpaces) } }
         if let bridge {
             bridge.remove()
             self.bridge = nil
@@ -131,8 +159,9 @@ final class Restorer: @unchecked Sendable {
             usleep(500_000)
             fixFramesAfterBridge(windows)
         }
-        if !dryRun { restoreStacking(windows) }
+        if !dryRun { timed("겹친 순서") { restoreStacking(windows) } }
         if !dryRun { returnToSavedSpaces() }
+        report.timings = (report.timings ?? []) + [.init(step: "전체", seconds: (Date().timeIntervalSince(started) * 10).rounded() / 10)]
         return report
     }
 
@@ -318,6 +347,7 @@ final class Restorer: @unchecked Sendable {
         guard !apps.isEmpty else { return indexes }
         let appName = windows[indexes[0]].appName
         var scan = AppScan()
+        let scanStart = Date()
         for app in apps {
             let one = WindowService.scan(pid: app.processIdentifier)
             scan.windows += one.windows
@@ -325,6 +355,8 @@ final class Restorer: @unchecked Sendable {
             scan.maybeBlockers.formUnion(one.maybeBlockers)
             scan.responding = scan.responding && one.responding
         }
+        scanSeconds += Date().timeIntervalSince(scanStart)
+        scanCount += 1
         if scan.responding { state.unresponsive.remove(bundleId) } else { state.unresponsive.insert(bundleId) }
         let live = scan.windows.filter { !state.used.contains($0.windowID) }
         // 약한 단서(제목 다름 등)는 앱이 안정된 뒤에: 원래 떠 있던 앱이거나, 띄운 지 5초가 지나고 창 수가 4초 동안 그대로일 때
@@ -339,6 +371,7 @@ final class Restorer: @unchecked Sendable {
         let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, id: \.windowID, byID: byID, allowWeak: stable)
         for pair in pairs {
             if pair.score == WindowMatcher.idScore { pairedByID += 1 } else { pairedByClues += 1 }
+            report.matches = (report.matches ?? []) + [.init(saved: pair.savedIndex, title: windows[pair.savedIndex].title, windowID: pair.live.windowID, score: pair.score)]
             matchedLive[pair.savedIndex] = pair.live
             state.placedIndexes.insert(pair.savedIndex)
             state.used.insert(pair.live.windowID)

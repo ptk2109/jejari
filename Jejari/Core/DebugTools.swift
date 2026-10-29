@@ -48,6 +48,51 @@ enum DebugTools {
         return log
     }
 
+    /// 불러오기 기록마다 snapshot.json과 before.json으로 짝짓기를 다시 돌려, 그때의 짝(report.json의 matches)과 다른 것을 보여 준다.
+    /// 짝짓기 규칙을 바꾼 뒤 지난 기록에서 무엇이 달라지는지 확인하는 용도 (jejari://replay).
+    /// 불러오기 전에 떠 있던 창(before)끼리만 비교한다. 나중에 뜬 창과의 짝은 다시 만들 수 없어 뺀다.
+    /// cluesOnly: 창 번호를 쓰지 않고 단서만으로 짝짓는다. 그때 창 번호로 짝지은 기록이면 그것이 정답이라 단서 짝짓기가 얼마나 틀리는지 잴 수 있다
+    static func replay(cluesOnly: Bool = false) -> (summary: String, log: [String]) {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        func load<T: Decodable>(_ type: T.Type, _ url: URL) -> T? { (try? Data(contentsOf: url)).flatMap { try? decoder.decode(T.self, from: $0) } }
+        let folders = ((try? FileManager.default.contentsOfDirectory(at: RunLogStore.directory, includingPropertiesForKeys: nil)) ?? []).sorted { $0.lastPathComponent < $1.lastPathComponent }
+        var log: [String] = [], compared = 0, skipped = 0, same = 0, changed = 0
+        for folder in folders {
+            guard let snapshot = load(Snapshot.self, folder.appendingPathComponent("snapshot.json")),
+                  let before = load(Snapshot.self, folder.appendingPathComponent("before.json")),
+                  let recorded = load(RunLogStore.Entry.self, folder.appendingPathComponent("report.json"))?.report.matches else { skipped += 1; continue }
+            compared += 1
+            let saved = snapshot.includedWindows
+            let beforeIDs = Set(before.windows.compactMap(\.windowID))
+            // 나중에 뜬 창과 짝지어졌던 저장 창은 비교에서 뺀다
+            let late = Set(recorded.filter { !beforeIDs.contains($0.windowID) }.map(\.saved))
+            let then = Dictionary(recorded.filter { beforeIDs.contains($0.windowID) }.map { ($0.saved, $0.windowID) }, uniquingKeysWith: { first, _ in first })
+            var now: [Int: CGWindowID] = [:]
+            for bundleId in Set(saved.map(\.bundleId)) {
+                let indexes = saved.indices.filter { saved[$0].bundleId == bundleId && !late.contains($0) }
+                let live = before.windows.filter { $0.bundleId == bundleId && $0.windowID != nil }
+                let byID = !cluesOnly && snapshot.apps.contains { s in
+                    s.bundleId == bundleId && before.apps.contains { b in b.bundleId == bundleId && b.pid.map { WindowMatcher.sameProcess(s, pid: $0, launchedAt: b.launchedAt) } == true }
+                }
+                for pair in WindowMatcher.pair(saved: indexes.map { ($0, saved[$0]) }, live: live, id: { $0.windowID ?? 0 }, byID: byID, allowWeak: true) {
+                    now[pair.savedIndex] = pair.live.windowID
+                }
+            }
+            var differences: [String] = []
+            for i in Set(then.keys).union(now.keys).sorted() {
+                if then[i] == now[i] { same += 1; continue }
+                changed += 1
+                let title = "\(saved[i].appName) \"\(saved[i].title.prefix(30))\""
+                func describe(_ id: CGWindowID?) -> String { id.flatMap { id in before.windows.first { $0.windowID == id } }.map { "\"\($0.title.prefix(30))\" (\($0.windowID ?? 0))" } ?? "짝 없음" }
+                differences.append("   \(title): 그때 \(describe(then[i])) → 지금 \(describe(now[i]))")
+            }
+            log.append("\(folder.lastPathComponent): 짝 \(then.count)개 중 다름 \(differences.count)개" + (late.isEmpty ? "" : ", 나중에 뜬 창 \(late.count)개 제외"))
+            log += differences
+        }
+        return ("기록 \(compared)개 비교 (짝 정보가 없는 기록 \(skipped)개 건너뜀): 같음 \(same), 다름 \(changed)", log)
+    }
+
     static func scramble() -> [String] {
         var log: [String] = []
         let displays = DisplayService.current()
@@ -126,6 +171,14 @@ extension AppState {
             Task.detached {
                 let log = DebugTools.drag(appQuery: app, to: to)
                 await MainActor.run { self.writeResult(ActionResult(action: "debugdrag", name: app, finishedAt: Date(), ok: true, summary: "끌기 시험", log: log)) }
+            }
+        case "replay":
+            // jejari://replay: 지난 불러오기 기록으로 짝짓기를 다시 돌려 그때와 다른 짝을 보여 준다
+            // jejari://replay?clues=1: 창 번호 없이 단서로만 (번호로 짝지은 기록과 비교하면 단서 짝짓기의 정확도)
+            let cluesOnly = query.first { $0.name == "clues" }?.value == "1"
+            Task.detached {
+                let result = DebugTools.replay(cluesOnly: cluesOnly)
+                await MainActor.run { self.writeResult(ActionResult(action: "replay", name: "", finishedAt: Date(), ok: result.summary.hasSuffix("다름 0"), summary: result.summary, log: result.log)) }
             }
         case "debugwindows":
             // 제자리 자신의 창 목록 (제목, 크기, 보이는지)
