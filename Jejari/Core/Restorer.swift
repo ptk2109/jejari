@@ -683,6 +683,11 @@ final class Restorer: @unchecked Sendable {
             let overlapping = group.contains { a in group.contains { b in a.live.windowID != b.live.windowID && a.saved.frame.intersects(b.saved.frame) } }
             guard overlapping, let display = group.first?.saved.displayUuid else { continue }
             _ = SpaceService.switchTo(display: display, index: targetIndex(group[0].saved))
+            // 이미 저장한 순서대로 겹쳐 있으면 건너뛴다 (앱을 하나씩 앞으로 불러오느라 화면이 바뀌고 시간이 든다).
+            // 보이는 창의 순서는 그 가상화면으로 전환한 뒤에야 정확하다
+            let now = WindowService.stackOrder()
+            let order = group.sorted { $0.order < $1.order }.map { now[$0.live.windowID] ?? Int.max }
+            if order == order.sorted() { continue }
             for item in group.sorted(by: { $0.order > $1.order }) {   // 뒤 창부터
                 AX.setBool(AXUIElementCreateApplication(item.live.pid), kAXFrontmostAttribute, true)
                 AXUIElementPerformAction(item.live.element, kAXRaiseAction as CFString)

@@ -107,6 +107,17 @@ enum WindowService {
         return result
     }
 
+    /// 창의 앞뒤 순서 (작을수록 앞). 지금 보이는 가상화면의 창은 화면에 보이는 창 목록의 순서가 정확하고,
+    /// 모든 창 목록(optionAll)은 보이는 창의 순서를 늦게 반영해(겹친 창을 앞으로 올려도 그대로) 그 뒤에 붙인다
+    static func stackOrder() -> [CGWindowID: Int] {
+        func ids(_ option: CGWindowListOption) -> [CGWindowID] {
+            (CGWindowListCopyWindowInfo(option, kCGNullWindowID) as? [[String: Any]] ?? []).compactMap { $0[kCGWindowNumber as String] as? CGWindowID }
+        }
+        var order: [CGWindowID: Int] = [:]
+        for id in ids(.optionOnScreenOnly) + ids(.optionAll) where order[id] == nil { order[id] = order.count }
+        return order
+    }
+
     /// 저장할 때 체크를 꺼 둘 앱. 잠깐 열어 두는 창이라 다시 열면 다른 화면으로 열려 짝이 지어지지 않는다
     static let uncheckedByDefault: Set<String> = ["com.apple.systempreferences"]
 
@@ -134,10 +145,7 @@ enum WindowService {
         var apps: [SavedApp] = []
         var windows: [SavedWindow] = []
         let chromeTabs = BrowserService.chromeWindows()
-        // 창 목록은 앞 창부터 뒤 창 순서 (모든 Space 포함)
-        let stack = Dictionary((CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? [])
-            .enumerated().compactMap { item in (item.element[kCGWindowNumber as String] as? CGWindowID).map { ($0, item.offset) } },
-            uniquingKeysWith: { first, _ in first })
+        let stack = stackOrder()
         for app in regularApps() {
             let bundleId = app.bundleIdentifier ?? ""
             apps.append(SavedApp(bundleId: bundleId, name: app.localizedName ?? bundleId, path: app.bundleURL?.path ?? "",
