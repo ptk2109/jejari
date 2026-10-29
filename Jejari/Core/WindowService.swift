@@ -18,9 +18,9 @@ struct LiveWindow {
 /// 앱 하나를 훑은 결과
 struct AppScan {
     var windows: [LiveWindow] = []
-    var blockers: [String] = []      // 사용자 입력을 기다리는 창 (기획서 12.2 #20)
-    /// 크기를 바꿀 수 없는 작은 표준 창. 보통 창(메신저 친구 목록 등)일 수도, 입력 대기(SVN 인증 등)일 수도 있어
-    /// windows에 넣어 두고, 저장된 창과 짝이 안 지어진 것만 입력 대기로 본다
+    var blockers: [String] = []      // 사용자 입력을 기다리는 창: 모달 (기획서 12.2 #20)
+    /// 입력 대기일 수도 있는 창: 그 앱에서 앞에 있는 대화상자나 크기를 바꿀 수 없는 창. 보통 창(메신저 친구 목록 등)일 수도 있어
+    /// windows에 넣어 두고, 저장된 창과 짝이 안 지어진 것만 입력 대기로 본다 (로그인·인증 창은 항상 앞에 뜬다)
     var maybeBlockers: Set<CGWindowID> = []
     var responding = true            // AX 요청에 제한 시간 안에 응답했는지
 }
@@ -60,6 +60,7 @@ enum WindowService {
             return result
         }
         let layout = SpaceService.layout()
+        let focused = (AX.attribute(app, kAXFocusedWindowAttribute) as AXUIElement?).flatMap(AX.windowID)
         let expected = Set(expectedWindowIDs(pid: pid).filter { SpaceService.location(of: $0, in: layout) != nil })
         var seen = Set<CGWindowID>()
         var found: [CGWindowID: UInt64] = [:]
@@ -74,13 +75,12 @@ enum WindowService {
             let subrole: String = AX.attribute(element, kAXSubroleAttribute) ?? ""
             let title: String = AX.attribute(element, kAXTitleAttribute) ?? ""
             let isDialog = subrole == kAXDialogSubrole || subrole == kAXSystemDialogSubrole
-            let small = frame.width < 600 && frame.height < 600
-            // 입력 대기 창: 모달 / 작은 대화상자. 크기를 바꿀 수 없는 작은 표준 창은 보류 (maybeBlockers)
-            if (AX.attribute(element, kAXModalAttribute) as Bool?) == true || (isDialog && small) {
+            // 입력 대기 창: 모달은 확실히. 앞에 있는 대화상자·크기 고정 창은 보류 (maybeBlockers). 크기로는 가르지 않는다
+            if (AX.attribute(element, kAXModalAttribute) as Bool?) == true {
                 result.blockers.append("\(title) (\(Int(frame.width))x\(Int(frame.height)))")
                 return
             }
-            if subrole == kAXStandardWindowSubrole && small && !AX.isSettable(element, kAXSizeAttribute) {
+            if windowID == focused && (isDialog || (subrole == kAXStandardWindowSubrole && !AX.isSettable(element, kAXSizeAttribute))) {
                 result.maybeBlockers.insert(windowID)
             }
             // 모달 창이 떠 있으면 큰 메인 창이 AXDialog로 보이기도 한다 (JetBrains)
@@ -131,6 +131,12 @@ enum WindowService {
         guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
         let start = info.kp_proc.p_starttime
         return Date(timeIntervalSince1970: TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
+    }
+
+    /// 그 번들의 실행 중인 앱. NSRunningApplication.runningApplications(withBundleIdentifier:)는 백그라운드에서
+    /// 실행 중인 앱을 가끔 빠뜨려(빈 목록, 2026-10-29 불러오기 중 확인) 워크스페이스 목록에서 찾는다
+    static func running(_ bundleId: String) -> [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == bundleId }
     }
 
     /// 일반 앱(Dock에 아이콘이 있는 앱). 자기 자신은 뺀다

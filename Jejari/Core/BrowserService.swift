@@ -12,7 +12,7 @@ enum BrowserService {
     }
 
     static func chromeWindows() -> [ChromeWindow] {
-        guard !NSRunningApplication.runningApplications(withBundleIdentifier: chrome).isEmpty else { return [] }
+        guard !WindowService.running(chrome).isEmpty else { return [] }
         // tell Chrome 안에서는 tab이 Chrome의 탭 객체로 해석되므로 구분자는 문자 코드로 (0단계)
         let source = """
         tell application id "\(chrome)"

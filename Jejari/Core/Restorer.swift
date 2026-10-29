@@ -282,7 +282,7 @@ final class Restorer: @unchecked Sendable {
     private func launchApps() {
         let needed = Set(snapshot.includedWindows.map(\.bundleId))
         for app in snapshot.apps where app.isIncluded && (needed.contains(app.bundleId) || snapshot.windowlessAppIndexes.contains { snapshot.apps[$0].bundleId == app.bundleId }) {
-            guard NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleId).isEmpty,
+            guard WindowService.running(app.bundleId).isEmpty,
                   !app.bundleId.isEmpty, FileManager.default.fileExists(atPath: app.path) else {
                 if !app.path.isEmpty && !FileManager.default.fileExists(atPath: app.path) { report.missing.append("\(app.name) (설치되어 있지 않음)") }
                 continue
@@ -375,7 +375,7 @@ final class Restorer: @unchecked Sendable {
     /// 앱 하나를 훑어 짝지은 창을 옮기고, 아직 짝이 없는 저장 창을 돌려준다.
     /// 그만 기다릴 앱이면 남은 창을 "없음"으로 보고하고 빈 목록을 돌려준다
     private func placeApp(_ bundleId: String, _ indexes: [Int], _ windows: [SavedWindow], _ state: inout Placement) -> [Int] {
-        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        let apps = WindowService.running(bundleId)
         guard !apps.isEmpty else { return indexes }
         for app in apps { events?.watch(app.processIdentifier) }
         let appName = windows[indexes[0]].appName
@@ -409,7 +409,7 @@ final class Restorer: @unchecked Sendable {
         }
         let matched = Set(pairs.map(\.savedIndex))
         let left = indexes.filter { !matched.contains($0) }
-        // 크기 고정 작은 창이 저장된 창과 짝이 안 지어졌고 아직 못 찾은 창이 있으면 입력 대기로 본다 (SVN 인증 등)
+        // 앞에 있는 대화상자·크기 고정 창이 저장된 창과 짝이 안 지어졌고 아직 못 찾은 창이 있으면 입력 대기로 본다 (로그인, SVN 인증 등)
         var blockers = scan.blockers
         let pairedIDs = Set(pairs.map(\.live.windowID))
         let strayBlockers = live.filter { scan.maybeBlockers.contains($0.windowID) && !pairedIDs.contains($0.windowID) }
@@ -497,12 +497,12 @@ final class Restorer: @unchecked Sendable {
         func appName(_ bundleId: String) -> String { windows.first { $0.bundleId == bundleId }?.appName ?? bundleId }
         for (bundleId, blockers) in state.blocked {
             report.problems.append("\(appName(bundleId)): 입력을 기다리는 창 \(blockers.joined(separator: ", "))")
-            if !dryRun { NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.activate() }
+            if !dryRun { WindowService.running(bundleId).first?.activate() }
         }
         for bundleId in state.unresponsive { report.problems.append("\(appName(bundleId)): 응답 없음") }
         for i in pending {
             let w = windows[i]
-            let running = !NSRunningApplication.runningApplications(withBundleIdentifier: w.bundleId).isEmpty
+            let running = !WindowService.running(w.bundleId).isEmpty
             let reason = !running ? "앱이 꺼져 있음" : (state.blocked[w.bundleId] != nil ? "입력 대기 중" : "맞는 창을 찾지 못함 (창이 없거나 다른 창)")
             report.missing.append("\(w.appName) \"\(w.title)\" (\(reason))")
             // 앱이 떠 있으면 끝난 뒤에도 지켜본다 (② 전체 복원). 입력을 마친 뒤 뜨는 창도 받는다
@@ -539,7 +539,7 @@ final class Restorer: @unchecked Sendable {
                 var placed: [String] = [], newlyWaiting = false
                 let used = Set(matchedLive.values.map(\.windowID))
                 for (bundleId, indexes) in Dictionary(grouping: lateCandidates, by: { placedWindows[$0].bundleId }) {
-                    let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+                    let apps = WindowService.running(bundleId)
                     for app in apps { events.watch(app.processIdentifier) }
                     let live = BrowserService.withTabs(apps.flatMap { WindowService.scan(pid: $0.processIdentifier).windows }.filter { !used.contains($0.windowID) }, bundleId: bundleId)
                     if countSince[bundleId]?.count != live.count { countSince[bundleId] = (live.count, Date()) }
@@ -779,7 +779,7 @@ final class Restorer: @unchecked Sendable {
         report.problems.removeAll { $0.contains("(앱이 크기를 제한함)") }
         for (bundleId, indexes) in Dictionary(grouping: windows.indices, by: { windows[$0].bundleId }) {
             var live: [LiveWindow] = []
-            for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleId) { live += WindowService.scan(pid: app.processIdentifier).windows }
+            for app in WindowService.running(bundleId) { live += WindowService.scan(pid: app.processIdentifier).windows }
             // 짝은 배치할 때 이미 정했다. 다시 짝지으면 위치가 바뀐 창끼리 엇갈릴 수 있어 그 결과를 쓴다
             let matched = indexes.compactMap { i in matchedLive[i].flatMap { m in live.first { $0.windowID == m.windowID } }.map { (savedIndex: i, live: $0) } }
             for pair in matched {
