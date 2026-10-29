@@ -117,7 +117,7 @@ final class AppState: ObservableObject {
     func selectDraftTarget(_ name: String?) {
         guard let captured = capturedDraft else { return }
         draftTarget = name
-        if let name, let old = try? SnapshotStore.load(name) {
+        if let name, let old = try? SnapshotStore.loadForMatching(name) {
             draft = captured.inheriting(from: old)
             draftName = name
         } else {
@@ -169,7 +169,7 @@ final class AppState: ObservableObject {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         busy = true
         status = "창을 모으는 중…"
-        let old = try? SnapshotStore.load(name)
+        let old = try? SnapshotStore.loadForMatching(name)
         Task.detached {
             var snapshot = WindowService.capture(name: name)
             if let old { snapshot = snapshot.inheriting(from: old) }
@@ -253,7 +253,7 @@ final class AppState: ObservableObject {
     func restore(_ name: String, mode: RestoreMode = .full, isUndo: Bool = false, quiet: Bool = false, ask: Bool = true, verifyOnly: Bool = false) {
         guard ensureAccessibility(quiet: quiet), !busy else { return }
         let snapshot: Snapshot
-        do { snapshot = try SnapshotStore.load(name) } catch {
+        do { snapshot = try SnapshotStore.loadForMatching(name) } catch {
             status = "불러오기 실패: \(error.localizedDescription)"
             if quiet { writeResult(ActionResult(action: verifyOnly ? "verify" : "restore", name: name, finishedAt: Date(), ok: false, summary: status)) }
             return
@@ -299,6 +299,8 @@ final class AppState: ObservableObject {
                 log.append(message)
                 Task { @MainActor in self.status = message }
             }.run()
+            // 다음에 불러오거나 다시 저장할 때 쓰도록 이번 짝을 기억한다 (앱이 켜져 있는 동안만 맞음)
+            if !verifyOnly && !isUndo { MatchCache.remember(snapshot, matches: report.matches ?? []) }
             if !verifyOnly && RunLogStore.isEnabled {
                 let after = WindowService.capture(name: name)
                 RunLogStore.record(.init(snapshot: isUndo ? "되돌리기" : name, mode: mode.rawValue, startedAt: startedAt, finishedAt: Date(),

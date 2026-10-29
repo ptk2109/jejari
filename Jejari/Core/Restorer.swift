@@ -17,6 +17,7 @@ struct RestoreReport: Codable {
         var saved: Int
         var title: String
         var windowID: CGWindowID
+        var pid: Int32
         var score: Int
     }
 
@@ -364,14 +365,10 @@ final class Restorer: @unchecked Sendable {
         let countStableSince = state.countSince[bundleId]!.since
         let stable = mode == .arrange || launchedAt[bundleId] == nil
             || (Date().timeIntervalSince(launchedAt[bundleId]!) > 5 && Date().timeIntervalSince(countStableSince) > 4)
-        // 저장할 때와 같은 프로세스가 떠 있으면 창 번호가 그대로다 (앱을 끄지 않은 ① 배치만, 되돌리기)
-        let byID = snapshot.apps.contains { saved in
-            saved.bundleId == bundleId && apps.contains { WindowMatcher.sameProcess(saved, pid: $0.processIdentifier, launchedAt: WindowService.startTime(of: $0.processIdentifier)) }
-        }
-        let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, id: \.windowID, byID: byID, allowWeak: stable)
+        let pairs = WindowMatcher.pair(saved: indexes.map { ($0, windows[$0]) }, live: live, id: \.windowID, allowWeak: stable)
         for pair in pairs {
             if pair.score == WindowMatcher.idScore { pairedByID += 1 } else { pairedByClues += 1 }
-            report.matches = (report.matches ?? []) + [.init(saved: pair.savedIndex, title: windows[pair.savedIndex].title, windowID: pair.live.windowID, score: pair.score)]
+            report.matches = (report.matches ?? []) + [.init(saved: pair.savedIndex, title: windows[pair.savedIndex].title, windowID: pair.live.windowID, pid: pair.live.pid, score: pair.score)]
             matchedLive[pair.savedIndex] = pair.live
             state.placedIndexes.insert(pair.savedIndex)
             state.used.insert(pair.live.windowID)
