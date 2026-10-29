@@ -302,7 +302,7 @@ final class AppState: ObservableObject {
             if !verifyOnly && RunLogStore.isEnabled {
                 let after = WindowService.capture(name: name)
                 RunLogStore.record(.init(snapshot: isUndo ? "되돌리기" : name, mode: mode.rawValue, startedAt: startedAt, finishedAt: Date(),
-                                         report: report, log: log.lines), before: before, after: after)
+                                         report: report, log: log.lines), snapshot: snapshot, before: before, after: after)
             }
             await MainActor.run {
                 self.busy = false

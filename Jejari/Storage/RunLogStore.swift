@@ -28,13 +28,15 @@ enum RunLogStore {
         var log: [String]
     }
 
-    /// logs/<시각>-<배치 이름>/ 에 before.json, report.json, after.json
-    static func record(_ entry: Entry, before: Snapshot?, after: Snapshot?) {
+    /// logs/<시각>-<배치 이름>/ 에 snapshot.json(불러온 배치), before.json, report.json, after.json.
+    /// snapshot과 before, report의 짝(matches)으로 짝짓기를 다시 돌려 볼 수 있다 (jejari://replay)
+    static func record(_ entry: Entry, snapshot: Snapshot, before: Snapshot?, after: Snapshot?) {
         let encoder = SnapshotStore.encoder
         let stamp = entry.startedAt.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false).timeSeparator(.omitted).dateSeparator(.dash))
         let folder = directory.appendingPathComponent("\(stamp)-\(SnapshotStore.fileName(entry.snapshot))", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? encoder.encode(entry).write(to: folder.appendingPathComponent("report.json"))
+        try? encoder.encode(snapshot).write(to: folder.appendingPathComponent("snapshot.json"))
         if let before { try? encoder.encode(before).write(to: folder.appendingPathComponent("before.json")) }
         if let after { try? encoder.encode(after).write(to: folder.appendingPathComponent("after.json")) }
         prune()
