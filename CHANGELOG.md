@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-29
+
 ### 추가
 
 - 불러오기가 끝난 뒤에도 3분 동안 늦게 뜨는 창(로그인을 거치는 메신저 등)을 지켜보다가 제자리로 옮긴다. 가상화면을 바꿔야 하는 창은 작업을 방해하지 않도록 알림을 누를 때 옮긴다 (메뉴, 결과 창에서도)
@@ -126,7 +128,8 @@
 - URL 명령(`jejari://save`, `restore`, `verify`, `undo`, `collapse`, `wipe`, `status`)과 결과 파일
 - 불러오기 기록(직전 상태, 결과, 불러온 뒤 상태) 최근 20개
 
-[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/ptk2109/jejari/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/ptk2109/jejari/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/ptk2109/jejari/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/ptk2109/jejari/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/ptk2109/jejari/compare/v0.5.0...v0.5.1
