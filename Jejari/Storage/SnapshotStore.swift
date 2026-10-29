@@ -32,13 +32,23 @@ enum SnapshotStore {
         return decoder
     }()
 
+    /// 창 번호와 프로세스는 앱이 켜져 있는 동안에만 맞으므로 배치에는 남기지 않는다 (MatchCache). 직전 상태는 곧 되돌리기에 쓰여서 남긴다
     static func save(_ snapshot: Snapshot) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try encoder.encode(snapshot).write(to: url(for: snapshot.name), options: .atomic)
+        let stored = snapshot.name == previousStateName ? snapshot : snapshot.withoutSession()
+        try encoder.encode(stored).write(to: url(for: snapshot.name), options: .atomic)
     }
 
+    /// 배치는 창 번호 없이(0.6.0으로 저장한 파일에 있어도 버림), 직전 상태는 그 프로세스가 아직 떠 있는 창 번호만
     static func load(_ name: String) throws -> Snapshot {
-        try decoder.decode(Snapshot.self, from: Data(contentsOf: url(for: name)))
+        let snapshot = try decoder.decode(Snapshot.self, from: Data(contentsOf: url(for: name)))
+        return name == previousStateName ? snapshot.keepingLiveSession() : snapshot.withoutSession()
+    }
+
+    /// 짝짓기에 쓸 배치: 마지막으로 불러올 때 짝지은 창 번호 중 아직 맞는 것을 붙인다
+    static func loadForMatching(_ name: String) throws -> Snapshot {
+        let snapshot = try load(name)
+        return name == previousStateName ? snapshot : MatchCache.apply(to: snapshot)
     }
 
     /// 저장된 스냅샷 (최근 것부터). 직전 상태는 뺀다

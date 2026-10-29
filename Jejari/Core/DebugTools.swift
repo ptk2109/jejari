@@ -59,10 +59,12 @@ enum DebugTools {
         let folders = ((try? FileManager.default.contentsOfDirectory(at: RunLogStore.directory, includingPropertiesForKeys: nil)) ?? []).sorted { $0.lastPathComponent < $1.lastPathComponent }
         var log: [String] = [], compared = 0, skipped = 0, same = 0, changed = 0
         for folder in folders {
-            guard let snapshot = load(Snapshot.self, folder.appendingPathComponent("snapshot.json")),
+            guard let logged = load(Snapshot.self, folder.appendingPathComponent("snapshot.json")),
                   let before = load(Snapshot.self, folder.appendingPathComponent("before.json")),
                   let recorded = load(RunLogStore.Entry.self, folder.appendingPathComponent("report.json"))?.report.matches else { skipped += 1; continue }
             compared += 1
+            // 기록의 배치에는 그때 맞았던 창 번호만 붙어 있다
+            let snapshot = cluesOnly ? logged.withoutSession() : logged
             let saved = snapshot.includedWindows
             let beforeIDs = Set(before.windows.compactMap(\.windowID))
             // 나중에 뜬 창과 짝지어졌던 저장 창은 비교에서 뺀다
@@ -72,10 +74,7 @@ enum DebugTools {
             for bundleId in Set(saved.map(\.bundleId)) {
                 let indexes = saved.indices.filter { saved[$0].bundleId == bundleId && !late.contains($0) }
                 let live = before.windows.filter { $0.bundleId == bundleId && $0.windowID != nil }
-                let byID = !cluesOnly && snapshot.apps.contains { s in
-                    s.bundleId == bundleId && before.apps.contains { b in b.bundleId == bundleId && b.pid.map { WindowMatcher.sameProcess(s, pid: $0, launchedAt: b.launchedAt) } == true }
-                }
-                for pair in WindowMatcher.pair(saved: indexes.map { ($0, saved[$0]) }, live: live, id: { $0.windowID ?? 0 }, byID: byID, allowWeak: true) {
+                for pair in WindowMatcher.pair(saved: indexes.map { ($0, saved[$0]) }, live: live, id: { $0.windowID ?? 0 }, allowWeak: true) {
                     now[pair.savedIndex] = pair.live.windowID
                 }
             }

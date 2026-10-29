@@ -147,6 +147,7 @@ open "jejari://undo"
 ## 저장 위치
 
 - 배치: `~/Library/Application Support/Jejari/snapshots/<이름>.json`
+- 마지막으로 불러올 때 짝지은 창 번호(다음 불러오기를 정확하게): `~/Library/Application Support/Jejari/matches.json`
 - 불러오기 기록(최근 20개): `~/Library/Application Support/Jejari/logs/`. 기본은 남기지 않는다. 불러오기가 이상하면 설정 → 일반 → "불러오기 기록을 남길까요?"를 **남기기**로 바꾸고 한 번 더 불러온 뒤, [기록 폴더 열기]의 폴더를 보내 주면 원인을 찾을 수 있다
 
 ## 지우기
