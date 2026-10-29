@@ -639,7 +639,7 @@ final class Restorer: @unchecked Sendable {
 
         if minimizedNow {
             AX.setBool(element, kAXMinimizedAttribute, false)
-            usleep(500_000)
+            waitUntil(0.8) { (AX.attribute(element, kAXMinimizedAttribute) as Bool?) != true }
         }
         if !samePlace {
             var other = displays.first(where: { $0.key != saved.displayUuid })?.value
@@ -665,14 +665,18 @@ final class Restorer: @unchecked Sendable {
                 // 같은 모니터 안에서 Space만 바꿀 때: 다른 모니터를 잠깐 거쳐야 현재 Space로 들어온다
                 if now?.display == saved.displayUuid, let other {
                     AX.setPosition(element, CGPoint(x: other.minX + 50, y: other.minY + 50))
-                    usleep(300_000)
+                    waitUntil(0.5) { SpaceService.location(of: live.windowID)?.display != saved.displayUuid }
                 }
             }
         }
         AX.setPosition(element, saved.frame.origin)
         AX.setSize(element, saved.frame.size)
         AX.setPosition(element, saved.frame.origin)
-        usleep(200_000)
+        waitUntil(0.5) {
+            let frame = AX.frame(element), at = SpaceService.location(of: live.windowID)
+            return at?.display == saved.displayUuid && at?.index == index
+                && abs(frame.minX - saved.frame.minX) < 2 && abs(frame.minY - saved.frame.minY) < 2
+        }
         if saved.minimized { AX.setBool(element, kAXMinimizedAttribute, true) }
 
         let after = SpaceService.location(of: live.windowID), result = AX.frame(element)
@@ -705,11 +709,17 @@ final class Restorer: @unchecked Sendable {
         let frame = AX.frame(window.element)
         guard let other = bounceFrame(excluding: display), SpaceService.switchTo(display: display, index: index) else { return false }
         AX.setPosition(window.element, CGPoint(x: other.minX + 50, y: other.minY + 50))
-        usleep(300_000)
+        waitUntil(0.5) { SpaceService.location(of: window.windowID)?.display != display }
         AX.setPosition(window.element, frame.origin)
         AX.setSize(window.element, frame.size)
-        usleep(200_000)
+        waitUntil(0.5) { SpaceService.location(of: window.windowID).map { $0.display == display && $0.index == index } == true }
         return SpaceService.location(of: window.windowID).map { $0.display == display && $0.index == index } == true
+    }
+
+    /// 조건이 맞을 때까지 기다린다 (최대 limit초, 30ms 간격). 창 서버가 반영하는 데 걸리는 시간이 앱마다 달라 고정 대기 대신 쓴다
+    private func waitUntil(_ limit: TimeInterval, _ condition: () -> Bool) {
+        let start = Date()
+        while !condition() && Date().timeIntervalSince(start) < limit { usleep(30_000) }
     }
 
     /// 모니터마다 [필요한 화면들][보관 화면 1개] 로 정리한다 (사용자 요구, 2026-10-27).
