@@ -46,7 +46,7 @@ MIN_OS=$(/usr/libexec/PlistBuddy -c "Print LSMinimumSystemVersion" "$PLIST")
 # 서명 확인: 같은 Team으로 서명해야 사용자의 손쉬운 사용 권한이 업데이트 뒤에도 유지된다
 codesign --verify --deep --strict "$APP" || fail "서명 검증 실패"
 TEAM=$(codesign -dv "$APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')
-[[ -n "$TEAM" && "$TEAM" != "not set" ]] || fail "Team 서명이 아님 (Configs/Signing.local.xcconfig 확인)"
+[[ -n "$TEAM" && "$TEAM" != "not set" ]] || fail "Team 서명이 아님 (LAB_APPLE_TEAM 환경변수와 xcodegen generate 확인)"
 
 echo "▶ 압축, 서명"
 mkdir -p dist
