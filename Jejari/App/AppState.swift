@@ -31,6 +31,9 @@ final class AppState: ObservableObject {
 
     /// 불러오기가 끝난 뒤 늦게 떴지만 가상화면을 바꿔야 해서 사용자가 누를 때까지 기다리는 창
     @Published var lateWaiting: [String] = []
+    /// 아직 뜨지 않아 지켜보는 창과 지켜보기가 끝나는 시각 (메뉴 맨 위에 보인다)
+    @Published var lateWatching: [String] = []
+    @Published var lateDeadline: Date?
     /// 끝난 뒤 지켜보는 불러오기. 다른 작업을 시작하면 멈춘다
     private var lateRestorer: Restorer?
     private var lateFlag: CancelFlag?
@@ -340,18 +343,24 @@ final class AppState: ObservableObject {
             // 앱은 떠 있는데 못 찾은 창은 끝난 뒤에도 지켜본다 (로그인을 거쳐 늦게 뜨는 앱 등)
             guard mode == .full, !verifyOnly, !isUndo, !restorer.lateCandidates.isEmpty else { return }
             let flag = CancelFlag()
+            let watching = restorer.lateCandidateNames()
             await MainActor.run {
                 self.lateRestorer = restorer
                 self.lateFlag = flag
                 self.lateLogFolder = folder
+                self.lateWatching = watching
+                self.lateDeadline = Date().addingTimeInterval(Self.lateWatchDuration)
             }
             restorer.watchLate(for: Self.lateWatchDuration, isCancelled: { flag.isSet }) { update in
                 if let folder { RunLogStore.appendLate(folder, update.placed.map { "옮김: \($0)" } + update.waiting.map { "누를 때까지 기다림: \($0)" }) }
                 Task { @MainActor in self.applyLate(update, notifyWaiting: true) }
             }
             await MainActor.run {
-                // 기다리는 창이 없으면 다 끝났다. 있으면 사용자가 누를 때까지 남겨 둔다
-                if self.lateFlag === flag && self.lateWaiting.isEmpty { self.lateRestorer = nil }
+                guard self.lateFlag === flag else { return }
+                self.lateWatching = []
+                self.lateDeadline = nil
+                // 누르기를 기다리는 창이 없으면 다 끝났다. 있으면 사용자가 누를 때까지 남겨 둔다
+                if self.lateWaiting.isEmpty { self.lateRestorer = nil }
             }
         }
     }
@@ -364,12 +373,23 @@ final class AppState: ObservableObject {
         lateFlag = nil
         lateRestorer = nil
         lateWaiting = []
+        lateWatching = []
+        lateDeadline = nil
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.lateNotificationID])
+    }
+
+    /// 지켜보기만 멈춘다 (메뉴의 "그만 기다리기"). 이미 떠서 누르기를 기다리는 창은 남긴다
+    func stopLateWatching() {
+        lateFlag?.set()
+        lateWatching = []
+        lateDeadline = nil
+        if lateWaiting.isEmpty { lateRestorer = nil }
     }
 
     /// 끝난 뒤 지켜보기 결과를 반영한다. 새로 기다리게 된 창이 있으면 알린다
     private func applyLate(_ update: Restorer.LateUpdate, notifyWaiting: Bool) {
         lastReport = update.report
+        if lateDeadline != nil { lateWatching = update.pending }
         let more = update.waiting.count > lateWaiting.count
         lateWaiting = update.waiting
         if !update.placed.isEmpty { status = "늦게 뜬 창을 제자리로: \(update.placed.joined(separator: ", "))" }

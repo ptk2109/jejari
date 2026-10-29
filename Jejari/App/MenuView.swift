@@ -6,6 +6,20 @@ struct MenuView: View {
     @ObservedObject private var updates = UpdateService.shared
 
     var body: some View {
+        // 불러오기가 끝난 뒤 늦게 뜰 창을 지켜보는 중이면 맨 위에 한 줄 (목록은 하위 메뉴)
+        if let deadline = state.lateDeadline, !state.lateWatching.isEmpty {
+            Menu("⏳ 늦게 뜰 창 \(state.lateWatching.count)개 기다리는 중 · \(deadline.clockStamp)까지") {
+                ForEach(state.lateWatching, id: \.self) { Text($0) }
+                Divider()
+                Button("그만 기다리기") { state.stopLateWatching() }
+            }
+        }
+        if !state.lateWaiting.isEmpty {
+            Button("늦게 뜬 창 \(state.lateWaiting.count)개 제자리로") { state.placeLateWindows() }
+                .disabled(state.busy)
+        }
+        if !state.lateWatching.isEmpty || !state.lateWaiting.isEmpty { Divider() }
+
         Button("📸 현재 배치 저장…") { state.startSave() }
             .disabled(state.busy)
 
@@ -41,10 +55,6 @@ struct MenuView: View {
         }
         Button("마지막 결과 보기") { state.open(.result) }
             .disabled(state.lastReport == nil)
-        if !state.lateWaiting.isEmpty {
-            Button("늦게 뜬 창 \(state.lateWaiting.count)개 제자리로") { state.placeLateWindows() }
-                .disabled(state.busy)
-        }
 
         Divider()
 

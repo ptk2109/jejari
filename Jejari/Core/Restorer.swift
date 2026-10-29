@@ -512,11 +512,23 @@ final class Restorer: @unchecked Sendable {
 
     // MARK: 끝난 뒤 지켜보기
 
-    /// 끝난 뒤 지켜보기의 결과. waiting은 가상화면을 바꿔야 옮길 수 있어 사용자가 누를 때까지 기다리는 창
+    /// 끝난 뒤 지켜보기의 결과. waiting은 가상화면을 바꿔야 옮길 수 있어 사용자가 누를 때까지 기다리는 창,
+    /// pending은 아직 뜨지 않아 지켜보는 창
     struct LateUpdate {
         var report: RestoreReport
         var placed: [String]
         var waiting: [String]
+        var pending: [String]
+    }
+
+    /// 아직 뜨지 않아 지켜보는 창 (메뉴에 보여 준다)
+    func lateCandidateNames() -> [String] { lateLock.withLock { lateNames(lateCandidates) } }
+
+    private func lateNames(_ indexes: [Int]) -> [String] {
+        indexes.map { i in
+            let w = placedWindows[i]
+            return w.title.isEmpty ? w.appName : "\(w.appName) \"\(w.title.prefix(24))\""
+        }
     }
 
     /// 늦게 떴지만 가상화면을 바꿔야 옮길 수 있는 창
@@ -558,7 +570,7 @@ final class Restorer: @unchecked Sendable {
                         }
                     }
                 }
-                return placed.isEmpty && !newlyWaiting ? nil : LateUpdate(report: report, placed: placed, waiting: waitingNames())
+                return placed.isEmpty && !newlyWaiting ? nil : LateUpdate(report: report, placed: placed, waiting: waitingNames(), pending: lateNames(lateCandidates))
             }
             if let update { onChange(update) }
             if lateLock.withLock({ lateCandidates.isEmpty }) { break }
@@ -581,13 +593,11 @@ final class Restorer: @unchecked Sendable {
                 self.bridge = nil
             }
             for (display, index) in before { SpaceService.switchTo(display: display, index: index) }
-            return LateUpdate(report: report, placed: placed, waiting: [])
+            return LateUpdate(report: report, placed: placed, waiting: [], pending: lateNames(lateCandidates))
         }
     }
 
-    private func waitingNames() -> [String] {
-        waitingLate.map { "\(placedWindows[$0.index].appName) \"\(placedWindows[$0.index].title.prefix(30))\"" }
-    }
+    private func waitingNames() -> [String] { lateNames(waitingLate.map(\.index)) }
 
     /// 가상화면을 바꾸지 않고 옮길 수 있는지: 이미 목표 가상화면에 있거나,
     /// 목표가 그 모니터에서 지금 보이는 가상화면이고 창도 지금 보이는 화면에 있을 때 (다른 모니터로 옮기기만 하면 됨)

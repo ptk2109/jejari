@@ -171,6 +171,12 @@ extension AppState {
                 let log = DebugTools.drag(appQuery: app, to: to)
                 await MainActor.run { self.writeResult(ActionResult(action: "debugdrag", name: app, finishedAt: Date(), ok: true, summary: "끌기 시험", log: log)) }
             }
+        case "debuglate":
+            // jejari://debuglate[?stop=1]: 끝난 뒤 지켜보기 상태(메뉴 맨 위 줄에 쓰는 값). stop=1이면 "그만 기다리기"
+            if query.first(where: { $0.name == "stop" })?.value == "1" { stopLateWatching() }
+            writeResult(ActionResult(action: "debuglate", name: "", finishedAt: Date(), ok: true,
+                                     summary: "지켜보는 창 \(lateWatching.count)개 · \(lateDeadline?.clockStamp ?? "-")까지, 누르기 기다림 \(lateWaiting.count)개",
+                                     log: lateWatching.map { "지켜봄: \($0)" } + lateWaiting.map { "누르기 기다림: \($0)" }))
         case "replay":
             // jejari://replay: 지난 불러오기 기록으로 짝짓기를 다시 돌려 그때와 다른 짝을 보여 준다
             // jejari://replay?clues=1: 창 번호 없이 단서로만 (번호로 짝지은 기록과 비교하면 단서 짝짓기의 정확도)
